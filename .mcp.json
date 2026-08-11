@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "higgsfield": {
-      "url": "https://mcp.higgsfield.ai/mcp",
-      "enabled": true,
-      "type": "http"
-    }
-  }
-}

@@ -5,3 +5,6 @@
 .vscode/
 .idea/
 *.swp
+
+# MCP config (local only)
+.mcp.json

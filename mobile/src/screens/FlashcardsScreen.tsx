@@ -9,18 +9,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppTabBar } from '../components/AppTabBar';
 import { ProgressBar } from '../components/ProgressBar';
 import { useFlashcards, usePlanets, useReviewFlashcard } from '../api/hooks';
+import { plural, useT, type TranslationKey } from '../i18n';
 import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing } from '../theme';
 import { speechPlayer } from '../voice/ttsPlayer';
 import type { CardRating, Flashcard } from '../types';
 
-const RATING_OPTIONS: { value: CardRating; label: string; color: string }[] = [
-  { value: 'hard', label: 'Hard', color: colors.error },
-  { value: 'medium', label: 'Medium', color: colors.warning },
-  { value: 'easy', label: 'Easy', color: colors.success },
+const RATING_OPTIONS: { value: CardRating; labelKey: TranslationKey; color: string }[] = [
+  { value: 'hard', labelKey: 'flashcards.ratingHard', color: colors.error },
+  { value: 'medium', labelKey: 'flashcards.ratingMedium', color: colors.warning },
+  { value: 'easy', labelKey: 'flashcards.ratingEasy', color: colors.success },
 ];
 
 function RatingButtons({ card }: { card: Flashcard }) {
+  const t = useT();
   const review = useReviewFlashcard();
   const [pending, setPending] = useState<CardRating | null>(null);
 
@@ -42,7 +44,7 @@ function RatingButtons({ card }: { card: Flashcard }) {
             style={[styles.ratingBtn, { borderColor: opt.color }, selected && { backgroundColor: opt.color }]}
           >
             <Text style={[styles.ratingText, { color: selected ? colors.textOnPrimary : opt.color }]}>
-              {opt.label}
+              {t(opt.labelKey)}
             </Text>
           </Pressable>
         );
@@ -53,6 +55,7 @@ function RatingButtons({ card }: { card: Flashcard }) {
 
 export function FlashcardsScreen() {
   const insets = useSafeAreaInsets();
+  const t = useT();
   const { activeDeckId, openDeck, closeDeck } = useUiStore();
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
@@ -67,7 +70,7 @@ export function FlashcardsScreen() {
   const deckCards = cards.filter((c) => (deck === 'all' || c.planet_id === deck) && c.due);
   const dueCount = deckCards.length;
   const planetName = (id: string | null) =>
-    id ? planets.find((p) => p.id === id)?.title ?? 'Planet' : 'All cards';
+    id ? planets.find((p) => p.id === id)?.title ?? t('flashcards.planetFallback') : t('flashcards.allCards');
 
   useEffect(() => {
     Animated.timing(flip, {
