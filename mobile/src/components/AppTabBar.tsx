@@ -1,10 +1,22 @@
-import { Copy, Globe, MessagesSquare } from 'lucide-react-native';
+import { BookOpen, Copy, MessagesSquare, User } from 'lucide-react-native';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { RingedPlanetIcon } from './icons/RingedPlanetIcon';
 import { useT } from '../i18n';
-import { useUiStore } from '../store/ui';
+import { useUiStore, type TabKey } from '../store/ui';
 import { colors, radius } from '../theme';
+
+type TabIcon = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
+
+const SIDE_TABS: { key: TabKey; icon: TabIcon; labelKey: 'tabBar.planets' | 'tabBar.lessons' | 'tabBar.cards' | 'tabBar.profile' }[] = [
+  { key: 'planets', icon: RingedPlanetIcon, labelKey: 'tabBar.planets' },
+  { key: 'lessons', icon: BookOpen, labelKey: 'tabBar.lessons' },
+];
+const RIGHT_TABS: typeof SIDE_TABS = [
+  { key: 'flashcards', icon: Copy, labelKey: 'tabBar.cards' },
+  { key: 'profile', icon: User, labelKey: 'tabBar.profile' },
+];
 
 export function AppTabBar({ dark = false }: { dark?: boolean }) {
   const t = useT();
@@ -19,31 +31,32 @@ export function AppTabBar({ dark = false }: { dark?: boolean }) {
   const activePill = dark ? 'rgba(74,68,190,0.55)' : colors.primarySoft;
   const activePillBorder = dark ? 'rgba(139,124,246,0.5)' : 'transparent';
 
+  const renderTab = ({ key, icon: Icon, labelKey }: (typeof SIDE_TABS)[number]) => {
+    const isActive = activeTab === key;
+    return (
+      <Pressable
+        key={key}
+        onPress={() => setTab(key)}
+        style={[styles.tab, isActive && { backgroundColor: activePill, borderColor: activePillBorder }]}
+        hitSlop={6}
+      >
+        <Icon size={21} color={isActive ? active : idle} strokeWidth={isActive ? 2.4 : 2} />
+        <Text style={[styles.label, { color: idle }, isActive && { color: active, fontWeight: '700' }]}>{t(labelKey)}</Text>
+      </Pressable>
+    );
+  };
+
   return (
     <View style={[styles.bar, { backgroundColor: barBg, borderTopColor: borderColor, paddingBottom: Math.max(insets.bottom, 10) }]}>
       <View style={styles.inner}>
-        {/* Left: Cards */}
-        <Pressable
-          onPress={() => setTab('flashcards')}
-          style={[styles.tab, activeTab === 'flashcards' && { backgroundColor: activePill, borderColor: activePillBorder }]}
-          hitSlop={6}
-        >
-          <Copy
-            size={22}
-            color={activeTab === 'flashcards' ? active : idle}
-            strokeWidth={activeTab === 'flashcards' ? 2.4 : 2}
-          />
-          <Text style={[styles.label, { color: idle }, activeTab === 'flashcards' && { color: active, fontWeight: '700' }]}>
-            {t('tabBar.cards')}
-          </Text>
-        </Pressable>
+        {SIDE_TABS.map(renderTab)}
 
         {/* Center: Chat — glowing purple circle */}
         <Pressable onPress={() => setTab('chat')} style={styles.chatButton} hitSlop={8}>
           <View style={[styles.chatGlow, activeTab === 'chat' && styles.chatGlowActive]}>
             <View style={[styles.chatButtonInner, activeTab === 'chat' && styles.chatButtonActive]}>
               <MessagesSquare
-                size={26}
+                size={24}
                 color={colors.textOnPrimary}
                 strokeWidth={2.4}
                 fill={activeTab === 'chat' ? colors.textOnPrimary : 'none'}
@@ -53,19 +66,7 @@ export function AppTabBar({ dark = false }: { dark?: boolean }) {
           <Text style={[styles.label, { color: idle }, activeTab === 'chat' && { color: active, fontWeight: '700' }]}>{t('tabBar.chat')}</Text>
         </Pressable>
 
-        {/* Right: Planets — dark purple rounded rect when active */}
-        <Pressable
-          onPress={() => setTab('planets')}
-          style={[styles.tab, activeTab === 'planets' && { backgroundColor: activePill, borderColor: activePillBorder }]}
-          hitSlop={6}
-        >
-          <Globe
-            size={22}
-            color={activeTab === 'planets' ? active : idle}
-            strokeWidth={activeTab === 'planets' ? 2.4 : 2}
-          />
-          <Text style={[styles.label, { color: idle }, activeTab === 'planets' && { color: active, fontWeight: '700' }]}>{t('tabBar.planets')}</Text>
-        </Pressable>
+        {RIGHT_TABS.map(renderTab)}
       </View>
     </View>
   );
@@ -80,24 +81,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-around',
-    paddingHorizontal: 16,
+    paddingHorizontal: 6,
   },
   tab: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingHorizontal: 4,
     borderRadius: 18,
     borderWidth: 1,
     borderColor: 'transparent',
   },
   label: {
     marginTop: 3,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
   },
   chatButton: {
-    flex: 1.2,
+    flex: 1.1,
     alignItems: 'center',
     marginTop: -30,
   },

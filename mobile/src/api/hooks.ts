@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   bumpPlanetProgress,
+  getCatalogStats,
   getPlanet,
   getPlanetLesson,
   getPlanets,
@@ -23,6 +24,7 @@ import {
   getConversations,
 } from './conversations';
 import { getGamificationStats } from './gamification';
+import { storage, StorageKeys } from '../storage';
 import type { CardRating } from '../types';
 
 export const queryKeys = {
@@ -34,7 +36,18 @@ export const queryKeys = {
   conversations: ['conversations'] as const,
   conversation: (id: string) => ['conversations', id] as const,
   gamification: ['gamification'] as const,
+  catalog: ['catalog'] as const,
 };
+
+/** Real course-content counts for the selected course, used by the pre-login
+ * screens. The course comes from the target-language picker (default 'en'). */
+export function useCatalogStats() {
+  const language = storage.getString(StorageKeys.targetLanguage) ?? 'en';
+  return useQuery({
+    queryKey: [...queryKeys.catalog, language],
+    queryFn: () => getCatalogStats(language),
+  });
+}
 
 export function useGamificationStats() {
   return useQuery({ queryKey: queryKeys.gamification, queryFn: getGamificationStats });

@@ -100,7 +100,7 @@ export function AuthTextField({ label, error, secure, ...inputProps }: Props) {
 
 const styles = StyleSheet.create({
   wrapper: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   label: {
     fontSize: 13,
@@ -133,7 +133,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    paddingVertical: 15,
+    paddingVertical: 12,
     fontSize: 16,
     color: colors.text,
   },

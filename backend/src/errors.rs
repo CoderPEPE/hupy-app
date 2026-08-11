@@ -3,6 +3,9 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 
+/// Crate-wide convenience alias for handlers, services and repositories.
+pub type Result<T> = std::result::Result<T, AppError>;
+
 #[derive(Debug)]
 pub enum AppError {
     BadRequest(String),
@@ -21,6 +24,9 @@ impl AppError {
     }
     pub fn conflict(msg: impl Into<String>) -> Self {
         Self::Conflict(msg.into())
+    }
+    pub fn not_found(msg: impl Into<String>) -> Self {
+        Self::NotFound(msg.into())
     }
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::Internal(msg.into())

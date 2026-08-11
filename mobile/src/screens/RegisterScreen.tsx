@@ -99,7 +99,7 @@ export function RegisterScreen({ navigation }: Props) {
 
   return (
     <AuthLayout
-      logo={require('../../assets/logo.jpg')}
+      logo={require('../../assets/brand/logo-wordmark.png')}
       title={t('auth.register.title')}
       subtitle={t('auth.register.subtitle')}
     >
@@ -176,6 +176,13 @@ export function RegisterScreen({ navigation }: Props) {
           <Text style={styles.linkStrong}>{t('auth.register.logIn')}</Text>
         </Text>
       </Pressable>
+
+      <Text style={styles.terms}>
+        {t('auth.termsPrefix')}
+        <Text style={styles.termsLink}>{t('auth.terms')}</Text>
+        {t('auth.and')}
+        <Text style={styles.termsLink}>{t('auth.privacy')}</Text>.
+      </Text>
     </AuthLayout>
   );
 }
@@ -211,5 +218,17 @@ const styles = StyleSheet.create({
   linkStrong: {
     color: colors.primary,
     fontWeight: '800',
+  },
+  terms: {
+    marginTop: spacing.md,
+    fontSize: 12,
+    lineHeight: 17,
+    color: colors.textFaint,
+    textAlign: 'center',
+  },
+  termsLink: {
+    color: colors.textMuted,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
 });

@@ -10,7 +10,8 @@ import { getRealtimeClientSecret } from '../api/realtime';
 import type { RealtimeTool } from '../api/realtime';
 import { translate, useI18nStore } from '../i18n';
 import { useAuthStore } from '../store/auth';
-import { float32ToPcm16Base64, resample } from './audioCodec';
+import { float32ToPcm16Base64, resample, rms } from './audioCodec';
+import { audioLevels } from './audioLevels';
 import { realtimeAudioPlayer } from './audioEngine';
 
 export type ConversationStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error';
@@ -44,16 +45,51 @@ const POST_SPEECH_MUTE_MS = 400;
  * catch the exact instant playback begins. After this, the mic stays live
  * through the whole tutor turn so the user can interrupt by talking, relying
  * on the VoiceChat audio session's hardware echo cancellation (see
- * `RECORDING_CONFIG.ios.audioSession`) instead of a full mute.
+ * `RECORDING_CONFIG.ios.audioSession`) plus the echo gate below.
  */
 const RESPONSE_START_GRACE_MS = 150;
 
+/**
+ * Mute window after the tutor's audio finishes, covering the tail still
+ * coming out of the speaker. Android needs longer because it mutes the whole
+ * turn anyway; iOS only needs to cover the playback tail.
+ */
+const POST_SPEECH_MUTE_IOS_MS = 150;
+
+// ---------------------------------------------------------------------------
+// Echo gate
+//
+// Hardware echo cancellation is not guaranteed: it is absent entirely in the
+// iOS Simulator, and degrades on a real device at high speaker volume. Without
+// it the tutor's own voice reaches the microphone, the server's VAD reports
+// `input_audio_buffer.speech_started`, the tutor cuts itself off, answers the
+// "interruption", and the whole thing loops.
+//
+// So while the tutor is speaking we require mic audio to be clearly louder
+// than the echo we are currently observing before forwarding it. A real
+// speaker sits far closer to the mic than the speaker bleed does, so genuine
+// barge-in still gets through; steady speaker echo does not. Once the gate
+// opens it stays open for the rest of the turn, so a real interruption is not
+// chopped up mid-sentence.
+// ---------------------------------------------------------------------------
+
+/** Smoothing for the running estimate of the echo level (0..1, higher = faster). */
+const ECHO_FLOOR_ALPHA = 0.15;
+/** How much louder than the observed echo floor speech must be to count. */
+const ECHO_GATE_MARGIN = 2.5;
+/** Absolute floor, so near-silence can never open the gate. */
+const ECHO_GATE_MIN_RMS = 0.02;
+/** Consecutive qualifying frames (~100 ms each) required to open the gate. */
+const ECHO_GATE_FRAMES = 2;
+
 // Only used if the backend is too old to return the canonical instructions.
+// Intentionally names no one: the backend personalizes the real prompt with
+// the signed-in learner's own name, and this fallback has no way to know it.
 const FALLBACK_TUTOR_PROMPT =
   'You are Huppy, a patient English tutor for a Brazilian Portuguese speaker. Teach before testing: ' +
   'present each sentence in English, explain in Portuguese, demonstrate pronunciation, ask for ' +
   'three repetitions, correct mistakes gently, and review previous content at unexpected moments. ' +
-  'Keep replies short and encouraging. The learner\'s name is Sergio.';
+  'Keep replies short and encouraging. Do not assume the learner\'s name — ask if you need it.';
 
 /**
  * Debug-only logger: the voice pipeline is chatty by design (it's how the
@@ -108,6 +144,22 @@ export function useVoiceConversation(onToolCall: ToolCallHandler) {
   // call_id -> tool name, filled in when a function_call item starts and
   // consumed once its arguments finish streaming.
   const pendingToolCallsRef = useRef<Map<string, string>>(new Map());
+
+  // --- Echo gate state (see the constants above) --------------------------
+  /** Running estimate of the mic level attributable to speaker echo. */
+  const echoFloorRef = useRef(0);
+  /** True once the user has clearly spoken over the tutor this turn. */
+  const echoGateOpenRef = useRef(false);
+  /** Consecutive frames currently above the gate threshold. */
+  const gateStreakRef = useRef(0);
+
+  /** Called at the start of each tutor turn: nothing has been attributed to
+   * the user yet, and the echo level is unknown again. */
+  const resetEchoGate = () => {
+    echoGateOpenRef.current = false;
+    gateStreakRef.current = 0;
+    echoFloorRef.current = 0;
+  };
 
   const setConversationStatus = (next: ConversationStatus) => {
     statusRef.current = next;
@@ -206,6 +258,39 @@ async function ensureMicPermission(): Promise<boolean> {
       return; // raw base64 mode is not used
     }
 
+    const micRms = rms(samples);
+    // Feed the on-screen waveform with the real microphone level. Playback
+    // has its own publisher, so only report while the tutor isn't talking —
+    // otherwise the wave would show our own echo.
+    if (statusRef.current !== 'speaking') {
+      audioLevels.publish(micRms, 'mic');
+    }
+
+    // While the tutor is talking, only forward audio that is clearly louder
+    // than the echo we are hearing from our own speaker — otherwise the
+    // server's VAD treats the tutor's voice as an interruption and the
+    // conversation loops (see the echo-gate notes above).
+    if (statusRef.current === 'speaking' && !echoGateOpenRef.current) {
+      const level = micRms;
+      const threshold = Math.max(ECHO_GATE_MIN_RMS, echoFloorRef.current * ECHO_GATE_MARGIN);
+      if (level > threshold) {
+        gateStreakRef.current += 1;
+        if (gateStreakRef.current >= ECHO_GATE_FRAMES) {
+          echoGateOpenRef.current = true;
+          debugLog('[voice] echo gate opened — treating as real barge-in');
+        }
+      } else {
+        gateStreakRef.current = 0;
+        // Only adapt the floor while we believe we're hearing echo, so the
+        // user's own voice can't inflate the threshold against them.
+        echoFloorRef.current += (level - echoFloorRef.current) * ECHO_FLOOR_ALPHA;
+      }
+      if (!echoGateOpenRef.current) {
+        stats.dropped += 1;
+        return;
+      }
+    }
+
     const resampled = resample(samples, RECORD_RATE, TARGET_RATE);
     ws.send(
       JSON.stringify({
@@ -281,6 +366,15 @@ async function ensureMicPermission(): Promise<boolean> {
         // The user began talking — cut the tutor off immediately (barge-in:
         // automatic on iOS once real mic audio reaches the server mid-turn,
         // or from a manual tap-to-interrupt on either platform).
+        //
+        // If the tutor is mid-turn and the echo gate never opened, we know we
+        // forwarded no user speech, so whatever the server detected can only
+        // be our own playback leaking into the mic. Honouring it there is
+        // exactly what caused the interrupt/answer/interrupt loop.
+        if (statusRef.current === 'speaking' && !echoGateOpenRef.current) {
+          debugLog('[voice] ignoring speech_started — attributed to speaker echo');
+          break;
+        }
         realtimeAudioPlayer.clear();
         setConversationStatus('listening');
         break;
@@ -312,6 +406,9 @@ async function ensureMicPermission(): Promise<boolean> {
       case 'response.output_audio.delta':
         if (statusRef.current !== 'speaking') {
           debugLog('[voice] tutor speaking starts');
+          // New turn: re-learn the echo level and require the user to prove
+          // they're really talking before we forward audio again.
+          resetEchoGate();
           setConversationStatus('speaking');
           if (Platform.OS === 'ios') {
             micUnmuteAtRef.current = Date.now() + RESPONSE_START_GRACE_MS;
@@ -322,24 +419,25 @@ async function ensureMicPermission(): Promise<boolean> {
         }
         break;
 
-      case 'response.output_audio.done':
-        // Android only: keep the mic muted until the queued playback has
-        // actually finished (the API's "done" arrives before the audio
-        // finishes playing), plus a small safety margin. iOS relies on
-        // hardware echo cancellation instead and stays live throughout.
-        if (Platform.OS !== 'ios') {
-          micUnmuteAtRef.current =
-            Date.now() + realtimeAudioPlayer.getRemainingPlaybackMs() + POST_SPEECH_MUTE_MS;
-          debugLog(
-            '[voice] tutor done — mute until',
-            micUnmuteAtRef.current,
-            '(remaining ms:',
-            realtimeAudioPlayer.getRemainingPlaybackMs(),
-            ')',
-          );
-        }
+      case 'response.output_audio.done': {
+        // The API's "done" arrives before the queued audio has finished
+        // playing, so keep the mic muted for the remaining playback plus a
+        // safety margin — otherwise the tail of the tutor's sentence is heard
+        // as the user's reply. Android needs the longer margin because it has
+        // no guaranteed hardware AEC at all.
+        const margin = Platform.OS === 'ios' ? POST_SPEECH_MUTE_IOS_MS : POST_SPEECH_MUTE_MS;
+        micUnmuteAtRef.current = Date.now() + realtimeAudioPlayer.getRemainingPlaybackMs() + margin;
+        debugLog(
+          '[voice] tutor done — mute until',
+          micUnmuteAtRef.current,
+          '(remaining ms:',
+          realtimeAudioPlayer.getRemainingPlaybackMs(),
+          ')',
+        );
+        resetEchoGate();
         setConversationStatus('listening');
         break;
+      }
 
       case 'response.done':
         break;
@@ -382,6 +480,7 @@ async function ensureMicPermission(): Promise<boolean> {
     if (statusRef.current !== 'speaking') return;
     await realtimeAudioPlayer.clear();
     micUnmuteAtRef.current = 0;
+    resetEchoGate();
     ws.send(JSON.stringify({ type: 'response.cancel' }));
     setConversationStatus('listening');
   }, []);
@@ -414,6 +513,7 @@ async function ensureMicPermission(): Promise<boolean> {
     setError(null);
     setMessages([]);
     pendingToolCallsRef.current.clear();
+    resetEchoGate();
 
     // Ask for the microphone first — on Android this triggers the system popup.
     // (Must happen before any @siteed/audio-studio call: its internal request

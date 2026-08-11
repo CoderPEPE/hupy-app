@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type TabKey = 'chat' | 'flashcards' | 'planets';
+export type TabKey = 'chat' | 'flashcards' | 'planets' | 'lessons' | 'profile';
 
 /**
  * Pure UI state. All learning data (planets, lessons, flashcards, reviews,
@@ -20,6 +20,12 @@ type UiState = {
   lessonPlanetId: string | null;
   /** Switches to Chat with the chosen planet's lesson ready to play. */
   startLesson: (id: string) => void;
+
+  /** Chapter-intro interstitial shown before a lesson starts (Começar a Primeira Lição). */
+  lessonIntro: { planetId: string; lessonId: string } | null;
+  beginLesson: (planetId: string, lessonId: string) => void;
+  confirmLessonIntro: () => void;
+  cancelLessonIntro: () => void;
 
   /** Flashcards: the current deck id (null = deck list). */
   activeDeckId: string | null;
@@ -42,6 +48,12 @@ export const useUiStore = create<UiState>((set) => ({
 
   lessonPlanetId: null,
   startLesson: (id) => set({ lessonPlanetId: id, activeTab: 'chat' }),
+
+  lessonIntro: null,
+  beginLesson: (planetId, lessonId) => set({ lessonIntro: { planetId, lessonId } }),
+  confirmLessonIntro: () =>
+    set((s) => (s.lessonIntro ? { lessonPlanetId: s.lessonIntro.planetId, activeTab: 'chat', lessonIntro: null } : {})),
+  cancelLessonIntro: () => set({ lessonIntro: null }),
 
   activeDeckId: null,
   openDeck: (id) => set({ activeDeckId: id }),

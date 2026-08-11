@@ -13,6 +13,8 @@ export const ptBR: Translations = {
   // Language switcher (language names stay in their own language)
   'language.change': 'Mudar idioma',
   'language.en': 'English',
+  'language.es': 'Español',
+  'language.pt': 'Português',
   'language.ptBR': 'Português (Brasil)',
 
   // Networking (api/client.ts)
@@ -34,8 +36,18 @@ export const ptBR: Translations = {
   'auth.login.passwordPlaceholder': 'Sua senha',
   'auth.login.submit': 'Entrar',
   'auth.login.or': 'ou',
+  'auth.login.continueWith': 'Continuar com',
+  'auth.login.orEmail': 'ou entre com e-mail',
   'auth.login.noAccount': 'Novo no Huppy? ',
   'auth.login.createAccount': 'Criar uma conta',
+  'auth.rememberMe': 'Lembrar de mim',
+  'auth.forgotPassword': 'Esqueceu a senha?',
+  'auth.aiCard.title': 'Aprenda mais rápido com IA',
+  'auth.aiCard.body': 'Aulas personalizadas, conversas reais e progresso que se adapta a você.',
+  'auth.termsPrefix': 'Ao continuar, você concorda com nossos ',
+  'auth.terms': 'Termos de Uso',
+  'auth.and': ' e ',
+  'auth.privacy': 'Política de Privacidade',
 
   // Auth — register
   'auth.register.title': 'Crie sua conta',
@@ -61,6 +73,37 @@ export const ptBR: Translations = {
   'tabBar.cards': 'Cartões',
   'tabBar.chat': 'Chat',
   'tabBar.planets': 'Planetas',
+  'tabBar.lessons': 'Aulas',
+  'tabBar.profile': 'Perfil',
+
+  // Profile
+  'profile.streak': 'Sequência',
+  'profile.level': 'Nível',
+  'profile.bestStreak': 'Melhor sequência',
+  'profile.badges': 'Conquistas',
+  'profile.levelShort': 'Nv. {{level}}',
+  'profile.viewAll': 'Ver todas',
+  'profile.viewLess': 'Ver menos',
+  'profile.settings': 'Configurações',
+  'profile.changeLanguageSub': 'Escolha seu idioma de estudo',
+  'profile.changeVoiceSub': 'Escolha a voz do seu tutor',
+  'profile.noBadges': 'Nenhuma conquista ainda — comece uma aula para ganhar a primeira.',
+  // Streak hints (only shown when the underlying number is real)
+  'profile.streakKeepGoing': 'Continue assim! 🔥',
+  'profile.streakStart': 'Comece hoje',
+  'profile.streakPersonalBest': 'Recorde pessoal! 🏆',
+  // Level tiers, derived from XP
+  'profile.tierBeginner': 'Iniciante',
+  'profile.tierElementary': 'Básico',
+  'profile.tierIntermediate': 'Intermediário',
+  'profile.tierAdvanced': 'Avançado',
+
+  // Home (planets landing)
+  'home.greeting': 'Oi, {{name}}!',
+  'home.subtitle': 'Vamos continuar sua jornada.',
+  'home.yourPlanets': 'Seus planetas',
+  'home.seeAll': 'Ver tudo',
+  'home.menu': 'Menu',
 
   // Chat — header
   'chat.greeting': 'Oi, {{name}}',
@@ -71,6 +114,16 @@ export const ptBR: Translations = {
   'chat.history': 'Histórico de conversas',
   'chat.modeDemo': 'Demo',
   'chat.modeLive': 'Ao vivo',
+
+  // Chat — step indicator
+  'chat.step.listen': 'Escutar',
+  'chat.step.shadow': 'Shadowing',
+  'chat.step.speak': 'Falar',
+  'chat.step.correct': 'Corrigir',
+  'chat.listenPrompt': 'Escute a frase',
+  'chat.speakPrompt': 'Sua vez de falar',
+  'chat.correctPrompt': 'Aqui está sua correção',
+  'chat.waitingForTutor': 'Preparando sua primeira frase…',
 
   // Chat — banners
   'chat.unlockNotice': 'Planeta {{number}} desbloqueado! Continue assim.',
@@ -111,8 +164,8 @@ export const ptBR: Translations = {
 
   // Chat — orb hint
   'chat.hint.connecting': 'Conectando ao seu tutor…',
-  'chat.hint.tutorSpeaking': 'O tutor está falando — toque para interromper',
-  'chat.hint.micLive': 'O microfone está ativo — é só falar. Toque para encerrar.',
+  'chat.hint.tutorSpeaking': 'O tutor está falando — toque em ■ para encerrar',
+  'chat.hint.micLive': 'O microfone está ativo — é só falar. Toque em ■ para encerrar.',
   'chat.hint.tapToStart': 'Toque para iniciar a conversa',
   'chat.hint.demoPause': 'Aula demo · toque para pausar',
   'chat.hint.demoResume': 'Pausado · toque para continuar',
@@ -159,16 +212,29 @@ export const ptBR: Translations = {
   'flashcards.tapToFlipBack': 'Toque para virar de volta',
   'flashcards.ratingQuestion': 'O quanto você sabia isso?',
   'flashcards.ratingHard': 'Difícil',
-  'flashcards.ratingMedium': 'Médio',
-  'flashcards.ratingEasy': 'Fácil',
+  'flashcards.ratingMedium': 'Quase',
+  'flashcards.ratingEasy': 'Aprendi',
   'flashcards.planetFallback': 'Planeta',
   'flashcards.pendingRecheck': 'Marcado como fácil — a Huppy vai confirmar isso ao vivo',
   'flashcards.structureBack': 'Estrutura',
+  'flashcards.toReview': 'Revisar',
+  'flashcards.learned': 'Aprendidos',
+  'flashcards.retention': 'Sua retenção',
+  'flashcards.nextReview': 'Próxima revisão',
+  'flashcards.nextReviewIn': 'em {{days}} dias',
+  'flashcards.rememberPhrase': 'Lembre-se da frase',
+  'flashcards.ratingForgot': 'Não lembrei',
+  'flashcards.axisToday': 'Hoje',
+  'flashcards.axisPlus1': '+1dia',
+  'flashcards.axisPlus3': '+3dias',
+  'flashcards.axisPlus5': '+5dias',
+  'flashcards.axisPlus7': '+7dias',
+  'flashcards.axisPlus14': '+14dias',
+  'flashcards.axisPlus30': '+30dias',
 
   // Planets
   'planets.audioModeEnglishOnly': 'Só inglês',
   'planets.audioModeEnglishPause': 'Inglês + pausa',
-  'planets.audioModePtEn': 'PT → EN',
   'planets.audioModeRandom': 'Ordem aleatória',
   'planets.audioModeHardReview': 'Revisão difícil',
   'planets.tapToListen': 'Toque em play para ouvir',
@@ -201,6 +267,56 @@ export const ptBR: Translations = {
   'planets.planetTag': 'Planeta {{number}}',
   'planets.pause': 'Pausar',
   'planets.play': 'Reproduzir',
+
+  // Chapter intro (shown before a lesson starts)
+  'chapterIntro.chapter': 'Capítulo {{position}}',
+  'chapterIntro.lessonsLeftOne': '{{count}} lição para o próximo capítulo',
+  'chapterIntro.lessonsLeftOther': '{{count}} lições para o próximo capítulo',
+  'chapterIntro.start': 'Começar a Primeira Lição',
+  'chapterIntro.myWords': 'Minhas Palavras',
+  'chapterIntro.livePractice': 'Prática ao Vivo',
+
+  // Language picker
+  'languagePicker.title': 'Escolha seu idioma',
+  'languagePicker.subtitle': 'Você pode mudar isso depois.',
+  'languagePicker.iSpeak': 'Eu falo',
+  'languagePicker.iWantToLearn': 'Eu quero aprender',
+  'languagePicker.continue': 'Continuar',
+
+  // Voice picker (Profile settings)
+  'voicePicker.title': 'Voz do tutor',
+  'voicePicker.subtitle': 'Escolha quem vai te ensinar',
+  'voicePicker.female': 'Vozes femininas',
+  'voicePicker.male': 'Vozes masculinas',
+  'voicePicker.speaks': 'Fala {{language}}',
+  'voicePicker.play': 'Ouvir',
+  'voicePicker.playing': 'Tocando…',
+  'voicePicker.previewNote': 'A prévia fala uma saudação em {{language}}',
+  'voicePicker.done': 'Pronto',
+
+  // Course overview (pre-login) — every figure comes from /api/planets/catalog
+  'course.title': 'O que você vai aprender',
+  'course.eyebrow': 'O MÉTODO HUPY',
+  'course.body':
+    'Cada frase é praticada em voz alta com seu tutor, corrigida na hora e revisada pouco antes de você esquecer.',
+  'course.cta': 'Começar a aprender',
+  'course.statPlanets': 'Mundos',
+  'course.statSentences': 'Frases',
+  'course.statLessons': 'Aulas',
+  'course.loading': 'Carregando o curso…',
+  'course.bubble': 'Fale desde a sua primeira aula.',
+  'course.stepSpeak': 'Fale em voz alta',
+  'course.stepSpeakBody': 'Conversa por voz ao vivo, não múltipla escolha.',
+  'course.stepCorrect': 'Seja corrigido na hora',
+  'course.stepCorrectBody': 'Cada erro vira um cartão para você revisar.',
+  'course.stepReview': 'Revise na hora certa',
+  'course.stepReviewBody': 'A repetição espaçada agenda cada frase para você.',
+
+  // Mic / voice-recognition permission modal
+  'permissionModal.title': 'Sua vez de falar!',
+  'permissionModal.body': 'Ative o Microfone e o Reconhecimento de Voz para a Hupy corrigir a sua pronúncia.',
+  'permissionModal.unlockMic': 'Liberar Microfone',
+  'permissionModal.unlockSpeech': 'Liberar Reconhecimento de Voz',
 
   // Voice (useVoiceConversation.ts)
   'voice.micPermissionTitle': 'Acesso ao microfone',

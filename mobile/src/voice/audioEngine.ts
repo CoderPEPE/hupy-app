@@ -3,7 +3,8 @@ import {
   AudioContext,
   AudioManager,
 } from 'react-native-audio-api';
-import { pcm16Base64ToFloat32, resample } from './audioCodec';
+import { pcm16Base64ToFloat32, resample, rms } from './audioCodec';
+import { audioLevels } from './audioLevels';
 
 /**
  * Keep the iOS AVAudioSession in PlayAndRecord/VoiceChat so the recorder's
@@ -29,6 +30,31 @@ class RealtimeAudioPlayer {
   /** Wall-clock (Date.now) time at which all queued audio has finished playing. */
   private playbackEndAt = 0;
   private sources = new Set<AudioBufferSourceNode>();
+  /** Pending level-meter publishes, so `clear()` (barge-in) can cancel the
+   * waveform updates for audio that will now never be heard. */
+  private levelTimers = new Set<ReturnType<typeof setTimeout>>();
+
+  /**
+   * Reports the loudness of a chunk to the waveform at the moment it actually
+   * becomes audible. Chunks are queued ahead of the speaker, so publishing on
+   * arrival would run the visualization ahead of the sound.
+   *
+   * Long chunks are sampled in ~80 ms slices so the wave tracks the shape of
+   * the speech rather than flat-lining at one value per chunk.
+   */
+  private scheduleLevels(samples: Float32Array, rate: number, startInMs: number): void {
+    const sliceMs = 80;
+    const sliceLen = Math.max(1, Math.floor((rate * sliceMs) / 1000));
+    for (let offset = 0, i = 0; offset < samples.length; offset += sliceLen, i++) {
+      const slice = samples.subarray(offset, Math.min(offset + sliceLen, samples.length));
+      const level = rms(slice);
+      const timer = setTimeout(() => {
+        this.levelTimers.delete(timer);
+        audioLevels.publish(level, 'playback');
+      }, startInMs + i * sliceMs);
+      this.levelTimers.add(timer);
+    }
+  }
 
   private async getContext(): Promise<AudioContext> {
     if (!this.context) {
@@ -73,6 +99,7 @@ class RealtimeAudioPlayer {
       const ctxNow = ctx.currentTime;
       const startIn = Math.max(0, when - ctxNow);
       this.playbackEndAt = Math.max(this.playbackEndAt, Date.now() + startIn * 1000 + buffer.duration * 1000);
+      this.scheduleLevels(samples, ctxRate, startIn * 1000);
       this.sources.add(source);
       source.onEnded = () => {
         this.sources.delete(source);
@@ -115,6 +142,11 @@ class RealtimeAudioPlayer {
       }
     });
     this.sources.clear();
+    // Drop queued waveform updates for audio that is no longer going to play,
+    // then flatten the meter.
+    this.levelTimers.forEach(clearTimeout);
+    this.levelTimers.clear();
+    audioLevels.publish(0, 'playback');
     this.nextStartTime = 0;
     this.playbackEndAt = 0;
   }

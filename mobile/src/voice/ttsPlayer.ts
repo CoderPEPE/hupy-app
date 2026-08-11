@@ -16,6 +16,7 @@ import { configureIosSession } from './audioEngine';
 class SpeechPlayer {
   private context: AudioContext | null = null;
   private sources = new Set<AudioBufferSourceNode>();
+  private currentVoice: string | undefined = undefined;
 
   private async getContext(): Promise<AudioContext> {
     if (!this.context) {
@@ -26,17 +27,27 @@ class SpeechPlayer {
     return this.context;
   }
 
+  /** Permanently sets the voice clips fall back to when none is passed. */
+  setVoice(voice: string): void {
+    this.currentVoice = voice;
+  }
+
   /**
    * Speaks `text` out loud. Resolves once playback has actually finished
    * (or failed), with the clip duration in seconds (0 on failure), so callers
-   * can keep "Playing…" states accurate.
+   * can keep "Playing…" states accurate. `voice` sets the TTS voice; when
+   * omitted the previous voice (or the server default) is used. With
+   * `{ ephemeral: true }` the voice is used for this clip only and does not
+   * become the remembered fallback — the voice picker's previews use this so
+   * auditioning a voice can't change what the app actually speaks with.
    */
-  async speak(text: string): Promise<number> {
+  async speak(text: string, voice?: string, opts?: { ephemeral?: boolean }): Promise<number> {
     // Don't overlap clips: a new speak cancels whatever is playing.
     await this.stop();
+    if (voice !== undefined && !opts?.ephemeral) this.currentVoice = voice;
     try {
       const ctx = await this.getContext();
-      const bytes = await getSpeech(text);
+      const bytes = await getSpeech(text, undefined, this.currentVoice);
       const buffer = await ctx.decodeAudioData(bytes);
       if (buffer.length === 0) return 0;
 
@@ -82,3 +93,23 @@ class SpeechPlayer {
 }
 
 export const speechPlayer = new SpeechPlayer();
+
+/** The OpenAI TTS voice for a course's target language — mirrors the
+ * backend's per-language Realtime voices (en=marin, es=coral, pt=shimmer). */
+export function ttsVoiceFor(language: string): string {
+  switch (language) {
+    case 'es':
+      return 'coral';
+    case 'pt':
+      return 'shimmer';
+    default:
+      return 'marin';
+  }
+}
+
+/** Resolves the effective voice for TTS playback: the learner's stored
+ * choice (from `user.voice`), falling back to the course's default voice. */
+export function effectiveVoice(storedVoice: string, language: string): string {
+  const v = storedVoice.trim();
+  return v ? v : ttsVoiceFor(language);
+}

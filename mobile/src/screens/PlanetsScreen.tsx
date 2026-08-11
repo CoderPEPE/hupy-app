@@ -45,15 +45,16 @@ import { AppTabBar } from '../components/AppTabBar';
 import { GradientBar } from '../components/GradientBar';
 import { LanguageSwitch } from '../components/LanguageSwitch';
 import { StreakXpBar } from '../components/StreakXpBar';
-import { plural, useT, type TranslationKey } from '../i18n';
+import { plural, useT } from '../i18n';
 import {
   levelVisualStyle,
   planetImageSource,
   visualLevelForPlanet,
 } from '../planets/planetLevels';
+import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
 import { radius, spacing } from '../theme';
-import { speechPlayer } from '../voice/ttsPlayer';
+import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
 import type { Planet, PlanetDetail, PlanetLesson } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -71,13 +72,20 @@ const SPACE_TEXT_FAINT = 'rgba(255,255,255,0.30)';
 const GOLD = '#C9A227';
 const GOLD_DEEP = '#8B6A1F';
 
-const AUDIO_MODE_KEYS: TranslationKey[] = [
-  'planets.audioModeEnglishOnly',
-  'planets.audioModeEnglishPause',
-  'planets.audioModePtEn',
-  'planets.audioModeRandom',
-  'planets.audioModeHardReview',
-];
+/** Audio-mode labels for one course. The base→target chip is built from the
+ * planet's course language instead of a hardcoded "PT → EN": Spanish
+ * learners hear "PT → ES", Portuguese learners "EN → PT". */
+function audioModeLabels(t: ReturnType<typeof useT>, language: string): string[] {
+  const base = language === 'pt' ? 'EN' : 'PT';
+  const target = language === 'pt' ? 'PT' : language.toUpperCase();
+  return [
+    t('planets.audioModeEnglishOnly'),
+    t('planets.audioModeEnglishPause'),
+    `${base} → ${target}`,
+    t('planets.audioModeRandom'),
+    t('planets.audioModeHardReview'),
+  ];
+}
 
 // ---------------------------------------------------------------------------
 // Tiny deterministic helpers (stars, craters, debris — stable across renders)
@@ -297,9 +305,9 @@ function ProgressCard({
     },
     {
       icon: <AudioWaveform size={18} color="#22D3EE" />,
-      // listening is a real 0..1 ratio; shown as cumulative minutes (~40 min at
-      // full progress) to match the reference card layout.
-      value: `${Math.round((detail?.progress.listening ?? planet.progress.listening) * 40)}m`,
+      // `listening` is a 0..1 progress ratio from the backend, not a
+      // duration — show it as the percentage it actually is.
+      value: `${Math.round((detail?.progress.listening ?? planet.progress.listening) * 100)}%`,
       label: t('planets.statListening'),
     },
     {
@@ -446,7 +454,12 @@ const REPEAT_PAUSE_MS = 2500;
 
 function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; planet: Planet }) {
   const t = useT();
+  const user = useAuthStore((s) => s.user);
   const [mode, setMode] = useState(0);
+  const modeLabels = audioModeLabels(t, planet.language);
+  // The learner's chosen tutor voice speaks the continuous audio too; falls
+  // back to the course default when none was picked.
+  const voice = effectiveVoice(user?.voice ?? '', planet.language);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [nowText, setNowText] = useState(t('planets.tapToListen'));
@@ -505,14 +518,14 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
       if (cancelRef.current) return;
       const s = sentences[i];
       setNowText(`“${s.en}…”`);
-      const heard = await speechPlayer.speak(s.en);
+      const heard = await speechPlayer.speak(s.en, voice);
       if (cancelRef.current) return;
       if (heard > 0) {
         setNowText(t('planets.yourTurn'));
         await sleep(REPEAT_PAUSE_MS);
         if (cancelRef.current) return;
         setNowText(`“${s.en}…”`);
-        await speechPlayer.speak(s.en);
+        await speechPlayer.speak(s.en, voice);
         if (cancelRef.current) return;
       }
       setProgress((i + 1) / Math.max(total, 1));
@@ -537,7 +550,7 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
 
     setPlaying(true);
     setProgress(0);
-    const duration = await speechPlayer.speak(script);
+    const duration = await speechPlayer.speak(script, voice);
     if (duration <= 0) {
       setPlaying(false);
       setNowText(t('planets.couldNotLoadAudio'));
@@ -575,9 +588,9 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modeRow}>
-        {AUDIO_MODE_KEYS.map((key, i) => (
+        {modeLabels.map((label, i) => (
           <Pressable
-            key={key}
+            key={label}
             onPress={() => setMode(i)}
             style={[styles.modeChip, i === mode && styles.modeChipActive]}
           >
@@ -586,7 +599,7 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
             ) : i === 3 ? (
               <Shuffle size={11} color={i === mode ? SPACE_ACCENT : SPACE_TEXT_MUTED} />
             ) : null}
-            <Text style={[styles.modeChipText, i === mode && { color: SPACE_ACCENT }]}>{t(key)}</Text>
+            <Text style={[styles.modeChipText, i === mode && { color: SPACE_ACCENT }]}>{label}</Text>
           </Pressable>
         ))}
       </ScrollView>
@@ -644,14 +657,28 @@ export function PlanetsScreen() {
   const insets = useSafeAreaInsets();
   const t = useT();
   const { width } = useWindowDimensions();
-  const { startLesson, setTab } = useUiStore();
+  const { beginLesson, closePlanet, selectedPlanetId } = useUiStore();
   const { data: planets = [], isLoading } = usePlanets();
 
-  const [index, setIndex] = useState(0);
+  const initialIndex = Math.max(0, planets.findIndex((p) => p.id === selectedPlanetId));
+  const [index, setIndex] = useState(initialIndex);
   const [audioOpen, setAudioOpen] = useState(false);
   const listRef = useRef<FlatList<Planet>>(null);
   const scrollInFlight = useRef(false);
   const floatAnim = useRef(new Animated.Value(0)).current;
+
+  // Jump the carousel to the planet opened from Home, once planets have
+  // loaded (the list is empty on first render while the query is in flight).
+  const jumpedRef = useRef(false);
+  useEffect(() => {
+    if (jumpedRef.current || !selectedPlanetId || planets.length === 0) return;
+    const i = planets.findIndex((p) => p.id === selectedPlanetId);
+    if (i >= 0) {
+      jumpedRef.current = true;
+      setIndex(i);
+      requestAnimationFrame(() => listRef.current?.scrollToIndex({ index: i, animated: false }));
+    }
+  }, [planets, selectedPlanetId]);
 
   const planet = planets[index] ?? null;
   const detailQuery = usePlanet(planet?.id);
@@ -709,7 +736,7 @@ export function PlanetsScreen() {
     <View style={styles.screen}>
       {/* fixed top bar */}
       <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
-        <Pressable style={styles.roundBtn} onPress={() => setTab('chat')} hitSlop={8} accessibilityLabel={t('planets.back')}>
+        <Pressable style={styles.roundBtn} onPress={closePlanet} hitSlop={8} accessibilityLabel={t('planets.back')}>
           <ChevronLeft size={20} color={SPACE_TEXT} />
         </Pressable>
         <View style={styles.headerCenter}>
@@ -893,7 +920,7 @@ export function PlanetsScreen() {
                       key={l.id}
                       lesson={l}
                       isLast={i === lessons.length - 1}
-                      onPress={() => startLesson(planet.id)}
+                      onPress={() => beginLesson(planet.id, l.id)}
                     />
                   ))}
                   {lessons.length === 0 && (
@@ -914,7 +941,7 @@ export function PlanetsScreen() {
           <GradientCta
             label={continueLabel}
             disabled={!continueReady}
-            onPress={() => startLesson(planet.id)}
+            onPress={() => beginLesson(planet.id, nextLesson?.id ?? lessons[lessons.length - 1]?.id ?? '')}
           />
         </View>
       )}

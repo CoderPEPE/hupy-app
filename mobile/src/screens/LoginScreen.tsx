@@ -1,14 +1,17 @@
 import { useMutation } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { ChevronRight, Sparkles } from 'lucide-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AuthLayout } from '../components/AuthLayout';
 import { AuthTextField } from '../components/AuthTextField';
+import { Checkbox } from '../components/Checkbox';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { SocialAuthRow } from '../components/SocialAuthRow';
 import type { AuthStackParamList } from '../navigation/RootNavigator';
 import { useT } from '../i18n';
 import { useAuthStore } from '../store/auth';
-import { colors, spacing } from '../theme';
+import { colors, radius, spacing } from '../theme';
 import { isValidEmail } from '../utils/validation';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
@@ -17,6 +20,7 @@ export function LoginScreen({ navigation }: Props) {
   const t = useT();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const signIn = useAuthStore((s) => s.signIn);
 
@@ -61,10 +65,29 @@ export function LoginScreen({ navigation }: Props) {
 
   return (
     <AuthLayout
-      logo={require('../../assets/logo.jpg')}
+      logo={require('../../assets/brand/logo-wordmark.png')}
+      mascot={require('../../assets/brand/mascot-astronaut.png')}
       title={t('auth.login.title')}
       subtitle={t('auth.login.subtitle')}
+      onLanguagePress={() => navigation.navigate('LanguageSelect')}
+      scroll={false}
+      belowCard={
+        <Pressable style={styles.aiCard} onPress={() => navigation.navigate('CourseOverview')}>
+          <Sparkles size={15} color={colors.primary} />
+          <Text style={styles.aiCardText}>{t('auth.aiCard.title')}</Text>
+          <ChevronRight size={15} color={colors.textFaint} />
+        </Pressable>
+      }
     >
+      <Text style={styles.continueWith}>{t('auth.login.continueWith')}</Text>
+      <SocialAuthRow />
+
+      <View style={styles.dividerRow}>
+        <View style={styles.divider} />
+        <Text style={styles.dividerText}>{t('auth.login.orEmail')}</Text>
+        <View style={styles.divider} />
+      </View>
+
       <Animated.View style={fieldStyle()}>
         <AuthTextField
           label={t('auth.email')}
@@ -93,15 +116,16 @@ export function LoginScreen({ navigation }: Props) {
         />
       </Animated.View>
 
+      <View style={styles.rememberRow}>
+        <Checkbox checked={rememberMe} onChange={setRememberMe} label={t('auth.rememberMe')} />
+        <Pressable hitSlop={8}>
+          <Text style={styles.forgotText}>{t('auth.forgotPassword')}</Text>
+        </Pressable>
+      </View>
+
       <Animated.View style={fieldStyle()}>
         <PrimaryButton title={t('auth.login.submit')} onPress={handleSubmit} loading={mutation.isPending} />
       </Animated.View>
-
-      <View style={styles.dividerRow}>
-        <View style={styles.divider} />
-        <Text style={styles.dividerText}>{t('auth.login.or')}</Text>
-        <View style={styles.divider} />
-      </View>
 
       <Pressable
         style={styles.linkRow}
@@ -118,11 +142,43 @@ export function LoginScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  continueWith: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  forgotText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  aiCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: colors.card,
+    borderRadius: radius.round,
+    paddingVertical: 10,
+  },
+  aiCardText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.text,
+  },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing.lg,
-    marginBottom: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
   },
   divider: {
     flex: 1,
@@ -130,8 +186,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
   dividerText: {
-    marginHorizontal: spacing.md,
-    fontSize: 13,
+    marginHorizontal: spacing.sm,
+    fontSize: 11,
     fontWeight: '600',
     color: colors.textFaint,
     textTransform: 'uppercase',
@@ -139,7 +195,7 @@ const styles = StyleSheet.create({
   },
   linkRow: {
     alignItems: 'center',
-    paddingVertical: spacing.xs,
+    paddingVertical: 2,
   },
   linkText: {
     fontSize: 15,

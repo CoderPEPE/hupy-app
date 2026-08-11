@@ -2,6 +2,7 @@ import {
   bytesToBase64,
   base64ToBytes,
   resample,
+  rms,
   float32ToPcm16Base64,
   pcm16Base64ToFloat32,
 } from './audioCodec';
@@ -89,5 +90,29 @@ describe('PCM16 codec', () => {
     const samples = new Float32Array([0.25, -0.75]);
     const pcm = float32ToPcm16Base64(samples);
     expect(base64ToBytes(pcm).length).toBe(samples.length * 2);
+  });
+});
+
+
+describe('rms (echo-gate loudness estimate)', () => {
+  it('is zero for silence and for an empty frame', () => {
+    expect(rms(new Float32Array(0))).toBe(0);
+    expect(rms(new Float32Array(128))).toBe(0);
+  });
+
+  it('is 1 for a full-scale constant signal', () => {
+    const full = new Float32Array(64).fill(1);
+    expect(rms(full)).toBeCloseTo(1, 6);
+  });
+
+  it('ranks a loud frame above a quiet one, which is what the gate relies on', () => {
+    const quiet = new Float32Array(64).fill(0.01); // speaker echo
+    const loud = new Float32Array(64).fill(0.4); // user talking over it
+    expect(rms(loud)).toBeGreaterThan(rms(quiet));
+  });
+
+  it('ignores sign, so an oscillating waveform still reads as loud', () => {
+    const wave = Float32Array.from({ length: 64 }, (_, i) => (i % 2 === 0 ? 0.5 : -0.5));
+    expect(rms(wave)).toBeCloseTo(0.5, 6);
   });
 });

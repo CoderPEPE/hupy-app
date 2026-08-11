@@ -4,10 +4,10 @@ use diesel::r2d2::{self, ConnectionManager};
 
 pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
-pub fn establish_pool(database_url: &str) -> DbPool {
+pub fn establish_pool(database_url: &str, max_size: u32) -> DbPool {
     let manager = ConnectionManager::<PgConnection>::new(database_url);
     r2d2::Pool::builder()
-        .max_size(10)
+        .max_size(max_size)
         .build(manager)
         .expect("Failed to create database pool")
 }

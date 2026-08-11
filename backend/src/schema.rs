@@ -145,6 +145,8 @@ diesel::table! {
         verb -> Varchar,
         #[max_length = 512]
         complement -> Varchar,
+        #[max_length = 512]
+        es -> Varchar,
     }
 }
 
@@ -161,6 +163,8 @@ diesel::table! {
         topics -> Jsonb,
         unlock_mastery -> Float8,
         created_at -> Timestamptz,
+        #[max_length = 8]
+        language -> Varchar,
     }
 }
 
@@ -228,6 +232,10 @@ diesel::table! {
         #[max_length = 255]
         password_hash -> Varchar,
         created_at -> Timestamptz,
+        #[max_length = 8]
+        language -> Varchar,
+        #[max_length = 64]
+        voice -> Varchar,
     }
 }
 

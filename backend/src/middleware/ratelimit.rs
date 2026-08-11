@@ -1,3 +1,8 @@
+//! Per-IP sliding-window rate limiting for sensitive endpoints (auth,
+//! realtime token minting, TTS). In-memory and single-process — appropriate
+//! for a single-server deployment; swap for a shared store (Redis etc.) if
+//! the service ever scales horizontally.
+
 use crate::state::AppState;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::StatusCode;
@@ -10,8 +15,7 @@ use std::net::SocketAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-/// Sliding-window rate limiter, keyed by caller (IP). In-memory and
-/// single-process — appropriate for a single-server personal app.
+/// Sliding-window rate limiter, keyed by caller (IP).
 pub struct RateLimiter {
     max_requests: usize,
     window: Duration,
@@ -57,7 +61,8 @@ fn rate_limited() -> Response {
         .into_response()
 }
 
-/// Guards /api/auth/* (login + register) against brute-force attempts.
+/// Guards /api/auth/* (login + register) and the realtime token minting
+/// endpoint against brute-force attempts.
 pub async fn auth_ratelimit(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -65,6 +70,19 @@ pub async fn auth_ratelimit(
     next: Next,
 ) -> Response {
     if !state.auth_limiter.allow(&addr.ip().to_string()) {
+        return rate_limited();
+    }
+    next.run(request).await
+}
+
+/// Guards /api/tts so a single account can't burn OpenAI credits at will.
+pub async fn tts_ratelimit(
+    State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !state.tts_limiter.allow(&addr.ip().to_string()) {
         return rate_limited();
     }
     next.run(request).await
@@ -103,17 +121,4 @@ mod tests {
         assert!(!limiter.allow("a"));
         assert!(limiter.allow("b"));
     }
-}
-
-/// Guards /api/tts so a single account can't burn OpenAI credits at will.
-pub async fn tts_ratelimit(
-    State(state): State<AppState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    request: Request,
-    next: Next,
-) -> Response {
-    if !state.tts_limiter.allow(&addr.ip().to_string()) {
-        return rate_limited();
-    }
-    next.run(request).await
 }

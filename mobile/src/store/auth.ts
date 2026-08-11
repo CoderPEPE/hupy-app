@@ -12,6 +12,10 @@ type AuthState = {
   restore: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
+  /** Persists a course change ('en' | 'es' | 'pt') to the backend. */
+  setLanguage: (language: string) => Promise<void>;
+  /** Persists a tutor-voice choice (OpenAI voice id) to the backend. */
+  setVoice: (voice: string) => Promise<void>;
   signOut: () => void;
 };
 
@@ -60,10 +64,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signUp: async (email, password) => {
-    const { token, user } = await authApi.register(email, password);
+    // The course chosen in the pre-login language picker travels with the
+    // account; fall back to the backend default ('en').
+    const language = storage.getString(StorageKeys.targetLanguage) ?? undefined;
+    const { token, user } = await authApi.register(email, password, language);
     storage.set(StorageKeys.authToken, token);
     storage.set(StorageKeys.authUser, JSON.stringify(user));
     set({ token, user });
+  },
+
+  setLanguage: async (language) => {
+    const user = await authApi.setLanguage(language);
+    storage.set(StorageKeys.authUser, JSON.stringify(user));
+    storage.set(StorageKeys.targetLanguage, user.language);
+    set({ user });
+  },
+
+  setVoice: async (voice) => {
+    const user = await authApi.setVoice(voice);
+    storage.set(StorageKeys.authUser, JSON.stringify(user));
+    storage.set(StorageKeys.tutorVoice, user.voice);
+    set({ user });
   },
 
   signOut: () => {

@@ -5,6 +5,15 @@ export function getPlanets() {
   return apiRequest<Planet[]>('/api/planets', { auth: true });
 }
 
+/** How much content one course contains. Public (no auth) so the pre-login
+ * screens can state real figures instead of marketing claims; `language`
+ * picks which course to count ('en' | 'es' | 'pt', default 'en'). */
+export type CatalogStats = { planets: number; sentences: number; lessons: number };
+
+export function getCatalogStats(language = 'en') {
+  return apiRequest<CatalogStats>(`/api/planets/catalog?language=${language}`);
+}
+
 export function getPlanet(id: string) {
   return apiRequest<PlanetDetail>(`/api/planets/${id}`, { auth: true });
 }
@@ -13,14 +22,18 @@ export function getPlanetLesson(planetId: string) {
   return apiRequest<Lesson>(`/api/planets/${planetId}/lesson`, { auth: true });
 }
 
-export type ProgressMetric =
-  | 'sentences'
-  | 'pronunciation'
-  | 'conversation'
-  | 'listening'
-  | 'flashcards'
-  | 'review'
-  | 'mastery';
+/**
+ * The metrics `POST /planets/:id/progress` actually accepts — the tutor's
+ * qualitative judgment calls. Anything else is rejected server-side with a
+ * 400 (see BUMPABLE_METRICS in the backend).
+ *
+ * Deliberately excludes `sentences` and `flashcards` (derived from real
+ * counts via master_sentence / flashcard review) and `mastery` (always the
+ * computed average of the six sub-metrics, never written directly — an
+ * earlier build allowed it and left accounts showing progress for lessons
+ * they'd never done).
+ */
+export type ProgressMetric = 'pronunciation' | 'conversation' | 'listening' | 'review';
 
 /** Bumps one progress metric (clamped to 0..1 server-side) and returns the updated planet. */
 export function bumpPlanetProgress(planetId: string, metric: ProgressMetric, delta: number) {

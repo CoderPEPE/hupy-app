@@ -4,15 +4,17 @@ import { useI18nStore, useT } from '../i18n';
 import { colors, radius } from '../theme';
 
 /** Toggles between English and Brazilian Portuguese. One tap cycles the pair —
- * there are only two supported locales, so a picker would be overkill. */
-export function LanguageSwitch({ dark = false }: { dark?: boolean }) {
+ * there are only two supported locales, so a picker would be overkill.
+ * `onPress`, when given, replaces the instant toggle (e.g. opening the full
+ * language-selection screen from the auth screens instead). */
+export function LanguageSwitch({ dark = false, onPress }: { dark?: boolean; onPress?: () => void }) {
   const t = useT();
   const locale = useI18nStore((s) => s.locale);
   const setLocale = useI18nStore((s) => s.setLocale);
 
   return (
     <Pressable
-      onPress={() => setLocale(locale === 'en' ? 'pt-BR' : 'en')}
+      onPress={onPress ?? (() => setLocale(locale === 'en' ? 'pt-BR' : 'en'))}
       style={[styles.pill, dark && styles.pillDark]}
       hitSlop={8}
       accessibilityRole="button"

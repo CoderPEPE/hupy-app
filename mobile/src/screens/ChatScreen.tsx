@@ -4,6 +4,7 @@ import {
   ListChecks,
   Loader2,
   LogOut,
+  Mic,
   Sparkles,
   Volume2,
   Square,
@@ -11,7 +12,6 @@ import {
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
-  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -23,7 +23,10 @@ import { AppTabBar } from '../components/AppTabBar';
 import { Confetti } from '../components/Confetti';
 import { LanguageSwitch } from '../components/LanguageSwitch';
 import { Mascot } from '../components/Mascot';
+import { PermissionModal } from '../components/PermissionModal';
 import { StreakXpBar } from '../components/StreakXpBar';
+import { Card, IconButton, ScreenHeader } from '../components/ui';
+import { storage, StorageKeys } from '../storage';
 import {
   useAddCorrection,
   useAddMessage,
@@ -42,9 +45,10 @@ import type { ProgressMetric } from '../api/planets';
 import { localeTag, plural, useI18nStore, useT } from '../i18n';
 import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
-import { colors, radius, shadows, spacing } from '../theme';
+import { colors, radius, shadows, spacing, typography } from '../theme';
+import { audioLevels } from '../voice/audioLevels';
 import { useVoiceConversation, type ToolCallHandler } from '../voice/useVoiceConversation';
-import { speechPlayer } from '../voice/ttsPlayer';
+import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
 import type { ChatMessage, ConversationSummary, LessonCorrection, LessonStepKind } from '../types';
 
 function CorrectionCard({
@@ -55,13 +59,16 @@ function CorrectionCard({
   compact?: boolean;
 }) {
   const t = useT();
+  const user = useAuthStore((s) => s.user);
   const makeCard = useCorrectionToCard();
   const [converted, setConverted] = useState(false);
   const [playing, setPlaying] = useState(false);
 
   const play = async () => {
     setPlaying(true);
-    await speechPlayer.speak(correction.corrected);
+    // Corrections are in the course's target language, so use the learner's
+    // chosen tutor voice for it too.
+    await speechPlayer.speak(correction.corrected, effectiveVoice(user?.voice ?? '', user?.language ?? 'en'));
     setPlaying(false);
   };
 
@@ -129,35 +136,123 @@ function CorrectionCard({
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+const STEP_LABELS: { keys: [1 | 2 | 3 | 4, 'chat.step.listen' | 'chat.step.shadow' | 'chat.step.speak' | 'chat.step.correct'] }[] = [
+  { keys: [1, 'chat.step.listen'] },
+  { keys: [2, 'chat.step.shadow'] },
+  { keys: [3, 'chat.step.speak'] },
+  { keys: [4, 'chat.step.correct'] },
+];
+
+/** 1-4 step progress rail (Escutar/Shadowing/Falar/Corrigir). Steps 1-3 track
+ * the real voice status (tutor speaking vs. mic listening, with a short timer
+ * splitting "just finished listening" from "now talking freely" — the
+ * realtime API doesn't expose that distinction directly). Step 4 lights up
+ * whenever the latest message actually is a correction. */
+function StepIndicator({ current }: { current: 1 | 2 | 3 | 4 }) {
   const t = useT();
-  const isUser = message.role === 'user';
-  const kindLabel =
-    message.kind === 'teach'
-      ? t('chat.kind.teach')
-      : message.kind === 'repeat'
-        ? t('chat.kind.repeat')
-        : message.kind === 'question'
-          ? t('chat.kind.question')
-          : message.kind === 'praise'
-            ? t('chat.kind.praise')
-            : message.kind === 'review'
-              ? t('chat.kind.review')
-              : t('chat.kind.correction');
+  return (
+    <View style={styles.stepRow}>
+      {STEP_LABELS.map(({ keys: [n, labelKey] }, i) => {
+        const active = n === current;
+        const done = n < current;
+        return (
+          <React.Fragment key={n}>
+            {i > 0 && <View style={[styles.stepLine, (done || active) && styles.stepLineActive]} />}
+            <View style={styles.stepItem}>
+              <View style={[styles.stepDot, active && styles.stepDotActive, done && styles.stepDotDone]}>
+                <Text style={[styles.stepDotText, (active || done) && styles.stepDotTextActive]}>{n}</Text>
+              </View>
+              <Text style={[styles.stepLabel, active && styles.stepLabelActive]}>{t(labelKey)}</Text>
+            </View>
+          </React.Fragment>
+        );
+      })}
+    </View>
+  );
+}
+
+const WAVEFORM_BARS = 24;
+/** Levels stop arriving when nobody is talking; after this the wave decays. */
+const WAVEFORM_IDLE_MS = 200;
+
+/**
+ * Live waveform driven by the real audio level of the conversation — the
+ * microphone while the user talks, and the tutor's playback while it speaks
+ * (see `audioLevels`). New samples push in from the right, so the bars scroll
+ * like a real meter.
+ *
+ * Levels arrive ~10-25x/second, so each bar is an `Animated.Value` written
+ * directly: this never re-renders the Chat screen.
+ */
+function Waveform() {
+  const bars = useRef(Array.from({ length: WAVEFORM_BARS }, () => new Animated.Value(0))).current;
+  const history = useRef<number[]>(new Array(WAVEFORM_BARS).fill(0)).current;
+  const [live, setLive] = useState(false);
+
+  useEffect(() => {
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let decayTimer: ReturnType<typeof setInterval> | null = null;
+
+    const push = (level: number) => {
+      history.shift();
+      history.push(level);
+      for (let i = 0; i < bars.length; i++) bars[i].setValue(history[i]);
+    };
+
+    const stopDecay = () => {
+      if (decayTimer) {
+        clearInterval(decayTimer);
+        decayTimer = null;
+      }
+    };
+
+    /** Once audio stops, keep scrolling silence in so the tail drains off the
+     * left edge instead of the whole wave snapping flat. */
+    const startDecay = () => {
+      stopDecay();
+      decayTimer = setInterval(() => {
+        push(0);
+        if (history.every((v) => v === 0)) stopDecay();
+      }, 40);
+    };
+
+    const unsubscribe = audioLevels.subscribe((level) => {
+      stopDecay();
+      setLive(true);
+      push(level);
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        setLive(false);
+        startDecay();
+      }, WAVEFORM_IDLE_MS);
+    });
+
+    return () => {
+      unsubscribe();
+      if (idleTimer) clearTimeout(idleTimer);
+      stopDecay();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
-    <View style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowTutor]}>
-      <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleTutor]}>
-        {!isUser && message.kind && (
-          <View style={styles.bubbleKindRow}>
-            <Sparkles size={11} color={colors.primary} />
-            <Text style={styles.bubbleKind}>{kindLabel}</Text>
-          </View>
-        )}
-        <Text style={isUser ? styles.bubbleTextUser : styles.bubbleTextTutor}>{message.text}</Text>
-        {message.correction && <CorrectionCard correction={message.correction} />}
-        {message.time !== '' && <Text style={styles.bubbleTime}>{message.time}</Text>}
-      </View>
+    <View style={styles.waveform}>
+      {bars.map((b, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            styles.waveformBar,
+            {
+              backgroundColor: live ? colors.primary : colors.border,
+              height: b.interpolate({
+                inputRange: [0, 1],
+                outputRange: [3, 36],
+                extrapolate: 'clamp',
+              }),
+            },
+          ]}
+        />
+      ))}
     </View>
   );
 }
@@ -201,28 +296,18 @@ export function ChatScreen() {
   const [showHistory, setShowHistory] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [confettiKey, setConfettiKey] = useState(0);
+  const [showMicPrimer, setShowMicPrimer] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-  const pulse = useRef(new Animated.Value(0)).current;
 
   // One backend conversation per session — created once, on mount.
   const conversationIdRef = useRef<string | null>(null);
   const persistedMessagesRef = useRef<Set<string>>(new Set());
   const prevStatusesRef = useRef<string[]>([]);
   const prevBadgeCountRef = useRef<number | null>(null);
-  const hasAutoStartedRef = useRef(false);
   const planetRef = useRef(planet);
   planetRef.current = planet;
 
   const firstName = user?.email.split('@')[0] ?? t('chat.guestName');
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 1100, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      ]),
-    ).start();
-  }, [pulse]);
 
   /** Creates (once) and returns the backend conversation for this session. */
   const ensureConversation = async (): Promise<string | null> => {
@@ -363,17 +448,23 @@ export function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice.messages, addMessage]);
 
-  // Auto-activate the mic the moment we know which planet to teach — no
-  // buttons, per spec. Runs once per screen mount.
-  useEffect(() => {
-    if (hasAutoStartedRef.current || !planet) return;
-    hasAutoStartedRef.current = true;
-    (async () => {
-      await ensureConversation();
-      voice.start();
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planet]);
+  /** Opens the live session. Kept separate from the button handler so the
+   * mic primer can run it once the user has acknowledged the modal. */
+  const startConversation = async () => {
+    await ensureConversation();
+    voice.start();
+  };
+
+  const dismissMicPrimer = () => {
+    storage.set(StorageKeys.micPrimerSeen, true);
+    setShowMicPrimer(false);
+  };
+
+  /** Primer accepted → this was a deliberate "start", so begin listening. */
+  const acceptMicPrimer = () => {
+    dismissMicPrimer();
+    startConversation();
+  };
 
   // Surface an unlock banner (with a confetti burst) when a locked planet
   // becomes active — this only fires from real, server-computed mastery now.
@@ -415,26 +506,22 @@ export function ChatScreen() {
   }, []);
 
   const liveActive = voice.status !== 'idle' && voice.status !== 'error';
-  const orbLabel =
-    voice.status === 'connecting'
-      ? t('chat.orb.connecting')
-      : voice.status === 'speaking'
-        ? t('chat.orb.stop')
-        : liveActive
-          ? t('chat.orb.stop')
-          : t('chat.orb.start');
+  // The button is a plain start/stop toggle: tap to begin the session, tap
+  // again (square) to end it.
+  const orbLabel = liveActive ? t('chat.orb.stop') : t('chat.orb.start');
 
   const onOrbPress = async () => {
-    if (voice.status === 'speaking') {
-      voice.interrupt(); // barge-in: cut the tutor off
-      return;
-    }
+    // Live in any form (connecting, listening, tutor speaking) → stop.
     if (liveActive) {
       voice.stop();
       return;
     }
-    await ensureConversation();
-    voice.start();
+    // First ever start: explain why the mic is needed before requesting it.
+    if (!storage.getBoolean(StorageKeys.micPrimerSeen)) {
+      setShowMicPrimer(true);
+      return;
+    }
+    await startConversation();
   };
 
   const liveHint =
@@ -446,40 +533,73 @@ export function ChatScreen() {
           ? t('chat.hint.micLive')
           : t('chat.hint.tapToStart');
 
+
+  // "Shadowing" (just heard it, repeat it back) vs. "Falar" (talking freely)
+  // are both just voice.status === 'listening' to the API — split them with
+  // a short timer so the step indicator still reads as a real 4-phase drill.
+  const [listeningPhase, setListeningPhase] = useState<'shadow' | 'speak'>('shadow');
+  useEffect(() => {
+    if (voice.status !== 'listening') {
+      setListeningPhase('shadow');
+      return;
+    }
+    const timer = setTimeout(() => setListeningPhase('speak'), 4000);
+    return () => clearTimeout(timer);
+  }, [voice.status]);
+
+  const lastMessage = messages[messages.length - 1];
+  const currentStep: 1 | 2 | 3 | 4 = lastMessage?.correction
+    ? 4
+    : voice.status === 'connecting' || voice.status === 'speaking'
+      ? 1
+      : voice.status === 'listening'
+        ? listeningPhase === 'shadow'
+          ? 2
+          : 3
+        : 1;
+  const stepPrompt = currentStep === 4 ? t('chat.correctPrompt') : currentStep === 1 ? t('chat.listenPrompt') : t('chat.speakPrompt');
+
+  // The phrase shown big in the middle — the tutor's last real utterance
+  // (correction messages carry a fixed label as their `.text`, not a
+  // phrase, so they're excluded here and shown via the correction card
+  // below instead).
+  const currentPhrase = [...messages].reverse().find((m) => m.role === 'tutor' && m.kind !== 'correction' && m.text.trim())?.text ?? '';
+
+  const showingPraise = lastMessage?.kind === 'praise' && !lastMessage.partial ? lastMessage : null;
+
   return (
     <View style={styles.screen}>
-      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.headerGreeting}>{t('chat.greeting', { name: firstName })}</Text>
-          <View style={styles.planetPill}>
-            <View style={[styles.planetDot, { backgroundColor: planet?.color ?? colors.primary }]} />
-            <Text style={styles.planetPillText}>
-              {planet
-                ? t('chat.planetPill', { number: planet.number, title: planet.title })
-                : t('chat.loadingPlanets')}
-            </Text>
+      <ScreenHeader
+        left={
+          <View style={styles.headerLeft}>
+            <Text style={styles.headerGreeting}>{t('chat.greeting', { name: firstName })}</Text>
+            <View style={styles.planetPill}>
+              <View style={[styles.planetDot, { backgroundColor: planet?.color ?? colors.primary }]} />
+              <Text style={styles.planetPillText}>
+                {planet
+                  ? t('chat.planetPill', { number: planet.number, title: planet.title })
+                  : t('chat.loadingPlanets')}
+              </Text>
+            </View>
           </View>
-        </View>
-        <View style={styles.headerRight}>
-          <StreakXpBar />
-          <LanguageSwitch />
-          <Pressable
-            style={styles.headerIconBtn}
-            onPress={signOut}
-            accessibilityLabel={t('chat.logOut')}
-            hitSlop={8}
-          >
-            <LogOut size={18} color={colors.textMuted} />
-          </Pressable>
-          <Pressable
-            style={[styles.headerIconBtn, showHistory && styles.headerIconBtnActive]}
-            onPress={() => setShowHistory((s) => !s)}
-            accessibilityLabel={t('chat.history')}
-          >
-            <ListChecks size={20} color={showHistory ? colors.textOnPrimary : colors.textMuted} />
-          </Pressable>
-        </View>
-      </View>
+        }
+        right={
+          <>
+            <StreakXpBar />
+            <LanguageSwitch />
+            <IconButton onPress={signOut} accessibilityLabel={t('chat.logOut')}>
+              <LogOut size={18} color={colors.textMuted} />
+            </IconButton>
+            <IconButton
+              onPress={() => setShowHistory((v) => !v)}
+              accessibilityLabel={t('chat.history')}
+              style={showHistory ? styles.headerIconBtnActive : undefined}
+            >
+              <ListChecks size={20} color={showHistory ? colors.textOnPrimary : colors.textMuted} />
+            </IconButton>
+          </>
+        }
+      />
 
       {unlockNotice && (
         <Pressable style={styles.unlockBanner} onPress={clearUnlockNotice}>
@@ -503,61 +623,58 @@ export function ChatScreen() {
           />
         )
       ) : (
-        <>
-          <ScrollView
-            ref={scrollRef}
-            style={styles.transcript}
-            contentContainerStyle={styles.transcriptContent}
-            showsVerticalScrollIndicator={false}
-          >
-            <View style={styles.sessionBanner}>
-              <Sparkles size={14} color={colors.primary} />
-              <Text style={styles.sessionBannerText}>{t('chat.sessionLive')}</Text>
-            </View>
-            {messages.length === 0 && (
-              <View style={styles.mascotWrap}>
-                <Mascot size={88} />
-              </View>
-            )}
-            {messages.map((m) => (
-              <MessageBubble key={m.id} message={m} />
-            ))}
-            {liveActive && (
-              <View style={styles.listeningRow}>
-                <View style={styles.listeningDot} />
-                <Text style={styles.listeningText}>{t('chat.listening')}</Text>
-              </View>
-            )}
-          </ScrollView>
+        <ScrollView
+          ref={scrollRef}
+          style={styles.transcript}
+          contentContainerStyle={styles.transcriptContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <StepIndicator current={currentStep} />
 
-          <View style={[styles.footer, { paddingBottom: spacing.sm }]}>
-            <Animated.View
-              style={[
-                styles.orbRing,
-                {
-                  opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0.12] }),
-                  transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] }) }],
-                },
-              ]}
-            />
+          <Text style={styles.stepPrompt}>{stepPrompt}</Text>
+          {currentPhrase ? (
+            <Text style={styles.phraseText}>{currentPhrase}</Text>
+          ) : (
+            <View style={styles.mascotWrap}>
+              <Mascot size={72} />
+              <Text style={styles.waitingText}>{t('chat.waitingForTutor')}</Text>
+            </View>
+          )}
+
+          <Waveform />
+
+          <View style={styles.orbArea}>
+            <View style={styles.orbRing} />
             <Pressable
               style={[styles.orb, !liveActive ? styles.orbIdle : styles.orbActive]}
               onPress={onOrbPress}
               accessibilityLabel={orbLabel}
             >
-              {voice.status === 'speaking' ? (
-                <Square size={22} color={colors.textOnPrimary} fill={colors.textOnPrimary} />
+              {liveActive ? (
+                <Square size={26} color={colors.textOnPrimary} fill={colors.textOnPrimary} />
               ) : (
-                <Text style={styles.orbLabel}>{orbLabel}</Text>
+                <Mic size={30} color={colors.textOnPrimary} />
               )}
             </Pressable>
             <Text style={styles.orbHint}>{liveHint}</Text>
           </View>
-        </>
+
+          {showingPraise && (
+            <View style={styles.praisePill}>
+              <View style={styles.praiseCheck}>
+                <CheckCircle2 size={18} color="#FFFFFF" />
+              </View>
+              <Text style={styles.praiseText}>{showingPraise.text}</Text>
+            </View>
+          )}
+
+          {lastMessage?.correction && <CorrectionCard correction={lastMessage.correction} />}
+        </ScrollView>
       )}
 
       <AppTabBar />
       <Confetti burstKey={confettiKey} />
+      <PermissionModal visible={showMicPrimer} onDismiss={dismissMicPrimer} onContinue={acceptMicPrimer} />
     </View>
   );
 }
@@ -580,15 +697,7 @@ function HistoryList({
 
   return (
     <View style={styles.historyWrap}>
-      <View style={[styles.historyHeader, { paddingTop: topInset + spacing.sm }]}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.historyBack}>
-          <ChevronLeft size={22} color={colors.text} />
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.historyTitle}>{t('chat.history.title')}</Text>
-          <Text style={styles.historySub}>{t('chat.history.subtitle')}</Text>
-        </View>
-      </View>
+      <ScreenHeader title={t('chat.history.title')} subtitle={t('chat.history.subtitle')} onBack={onBack} />
       <ScrollView contentContainerStyle={styles.historyContent} showsVerticalScrollIndicator={false}>
         {isLoading ? (
           <View style={styles.historyEmpty}>
@@ -619,7 +728,7 @@ function ConversationRow({ conversation, onPress }: { conversation: Conversation
     minute: '2-digit',
   });
   return (
-    <Pressable style={styles.convCard} onPress={onPress}>
+    <Card row style={styles.convCard} onPress={onPress}>
       <View style={styles.convIcon}>
         <ListChecks size={18} color={colors.primary} />
       </View>
@@ -635,7 +744,7 @@ function ConversationRow({ conversation, onPress }: { conversation: Conversation
         </Text>
       </View>
       <ChevronLeft size={20} color={colors.textFaint} style={{ transform: [{ rotate: '180deg' }] }} />
-    </Pressable>
+    </Card>
   );
 }
 
@@ -650,28 +759,23 @@ function HistoryDetail({
 }) {
   const t = useT();
   const locale = useI18nStore((s) => s.locale);
+  const user = useAuthStore((s) => s.user);
   const { data: detail, isLoading } = useConversation(conversationId);
   const [playing, setPlaying] = useState<string | null>(null);
 
   const hear = async (text: string, id: string) => {
     setPlaying(id);
-    await speechPlayer.speak(text);
+    await speechPlayer.speak(text, effectiveVoice(user?.voice ?? '', user?.language ?? 'en'));
     setPlaying(null);
   };
 
   return (
     <View style={styles.historyWrap}>
-      <View style={[styles.historyHeader, { paddingTop: topInset + spacing.sm }]}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.historyBack}>
-          <ChevronLeft size={22} color={colors.text} />
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.historyTitle} numberOfLines={1}>
-            {detail?.title ?? t('chat.history.defaultTitle')}
-          </Text>
-          <Text style={styles.historySub}>{t('chat.history.transcript')}</Text>
-        </View>
-      </View>
+      <ScreenHeader
+        title={detail?.title ?? t('chat.history.defaultTitle')}
+        subtitle={t('chat.history.transcript')}
+        onBack={onBack}
+      />
       <ScrollView contentContainerStyle={styles.historyContent} showsVerticalScrollIndicator={false}>
         {isLoading ? (
           <View style={styles.historyEmpty}>
@@ -740,21 +844,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
   headerLeft: {
     flex: 1,
   },
   headerGreeting: {
-    fontSize: 22,
-    fontWeight: '800',
+    ...typography.title,
     color: colors.text,
-    letterSpacing: -0.3,
   },
   planetPill: {
     flexDirection: 'row',
@@ -773,22 +868,9 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   planetPillText: {
-    fontSize: 12,
+    ...typography.caption,
     fontWeight: '700',
     color: colors.primary,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  headerIconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.round,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   headerIconBtnActive: {
     backgroundColor: colors.primary,
@@ -816,25 +898,116 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
   },
-  sessionBanner: {
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+  },
+  stepItem: {
+    alignItems: 'center',
+    width: 64,
+  },
+  stepLine: {
+    width: 20,
+    height: 2,
+    backgroundColor: colors.border,
+    marginTop: 15,
+  },
+  stepLineActive: {
+    backgroundColor: colors.primary,
+  },
+  stepDot: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.round,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepDotActive: {
+    backgroundColor: colors.primary,
+  },
+  stepDotDone: {
+    backgroundColor: colors.primarySoft,
+  },
+  stepDotText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textFaint,
+  },
+  stepDotTextActive: {
+    color: colors.textOnPrimary,
+  },
+  stepLabel: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '600',
+    color: colors.textFaint,
+  },
+  stepLabelActive: {
+    color: colors.text,
+    fontWeight: '800',
+  },
+  stepPrompt: {
+    ...typography.caption,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  phraseText: {
+    ...typography.display,
+    fontSize: 26,
+    lineHeight: 34,
+    color: colors.text,
+  },
+  waveform: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.round,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginBottom: spacing.md,
+    justifyContent: 'center',
+    gap: 3,
+    height: 40,
+    marginTop: spacing.xl,
   },
-  sessionBannerText: {
-    marginLeft: 6,
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.primary,
+  waveformBar: {
+    width: 3,
+    borderRadius: 2,
   },
   mascotWrap: {
     alignItems: 'center',
     marginBottom: spacing.lg,
+  },
+  waitingText: {
+    marginTop: spacing.sm,
+    fontSize: 14,
+    color: colors.textMuted,
+    textAlign: 'center',
+  },
+  orbArea: {
+    alignItems: 'center',
+    marginTop: spacing.xl,
+  },
+  praisePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xl,
+    backgroundColor: colors.successSoft,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+  },
+  praiseCheck: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.round,
+    backgroundColor: colors.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  praiseText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.text,
   },
   bubbleRow: {
     marginVertical: 4,
@@ -972,39 +1145,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primary,
   },
-  listeningRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-  },
-  listeningDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.success,
-    marginRight: 8,
-  },
-  listeningText: {
-    fontSize: 13,
-    color: colors.textMuted,
-    fontStyle: 'italic',
-  },
-  footer: {
-    alignItems: 'center',
-    paddingTop: spacing.sm,
-  },
+  /** Static halo behind the mic button. Previously this pulsed on an infinite
+   * scale/opacity loop; it is now a plain soft ring (the animation read as a
+   * "bounce" and never stopped). */
   orbRing: {
     position: 'absolute',
-    top: spacing.sm - 6,
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: colors.primary,
+    top: -6,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: colors.primarySoft,
   },
   orb: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
     alignItems: 'center',
     justifyContent: 'center',
     ...shadows.button,
@@ -1021,36 +1176,13 @@ const styles = StyleSheet.create({
     color: colors.textOnPrimary,
   },
   orbHint: {
-    marginTop: 6,
-    fontSize: 12,
-    color: colors.textFaint,
+    marginTop: 10,
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.primary,
   },
   historyWrap: {
     flex: 1,
-  },
-  historyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
-  historyBack: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.round,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.sm,
-  },
-  historyTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  historySub: {
-    fontSize: 13,
-    color: colors.textMuted,
   },
   historyContent: {
     paddingHorizontal: spacing.lg,
@@ -1074,15 +1206,7 @@ const styles = StyleSheet.create({
     maxWidth: 260,
   },
   convCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.card,
-    borderRadius: radius.lg,
-    padding: spacing.md,
     marginBottom: spacing.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    ...shadows.card,
   },
   convIcon: {
     width: 42,
@@ -1094,13 +1218,13 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   convTitle: {
-    fontSize: 15,
+    ...typography.cardTitle,
     fontWeight: '700',
     color: colors.text,
   },
   convMeta: {
+    ...typography.caption,
     marginTop: 2,
-    fontSize: 12,
     color: colors.textMuted,
   },
   historyCorrection: {

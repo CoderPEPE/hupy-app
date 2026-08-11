@@ -3,6 +3,8 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Image, StyleSheet, Text, View } from 'react-native';
 import { MainTabs } from './MainTabs';
+import { CourseOverviewScreen } from '../screens/CourseOverviewScreen';
+import { LanguageSelectScreen } from '../screens/LanguageSelectScreen';
 import { LoginScreen } from '../screens/LoginScreen';
 import { RegisterScreen } from '../screens/RegisterScreen';
 import { useT } from '../i18n';
@@ -12,6 +14,8 @@ import { colors } from '../theme';
 export type AuthStackParamList = {
   Login: undefined;
   Register: undefined;
+  LanguageSelect: undefined;
+  CourseOverview: undefined;
 };
 
 export type AppStackParamList = {
@@ -51,7 +55,7 @@ function Splash() {
           transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1.08] }) }],
         }}
       >
-        <Image source={require('../../assets/logo.jpg')} style={styles.splashLogo} resizeMode="contain" />
+        <Image source={require('../../assets/brand/logo-wordmark.png')} style={styles.splashLogo} resizeMode="contain" />
       </Animated.View>
       <Text style={styles.splashTagline}>{t('splash.tagline')}</Text>
     </View>
@@ -76,6 +80,8 @@ export function RootNavigator() {
         <AuthStack.Navigator screenOptions={{ headerShown: false }}>
           <AuthStack.Screen name="Login" component={LoginScreen} />
           <AuthStack.Screen name="Register" component={RegisterScreen} />
+          <AuthStack.Screen name="LanguageSelect" component={LanguageSelectScreen} options={{ presentation: 'modal' }} />
+          <AuthStack.Screen name="CourseOverview" component={CourseOverviewScreen} options={{ presentation: 'modal' }} />
         </AuthStack.Navigator>
       )}
     </NavigationContainer>

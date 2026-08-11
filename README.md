@@ -18,6 +18,26 @@ cp .env.example .env        # set DATABASE_URL, JWT_SECRET, OPENAI_API_KEY
 cargo run                   # applies migrations on boot; serves on http://0.0.0.0:3000
 ```
 
+### Layout
+
+The server is organized in layers — HTTP stays out of business logic, and
+business logic stays out of SQL:
+
+| Path | Responsibility |
+|---|---|
+| `src/main.rs` | Thin bootstrap: config → pool → migrations → router → serve |
+| `src/config.rs` | Typed environment configuration, loaded once at boot |
+| `src/api/` | Routers, handlers, request/response DTOs, input validation (axum) |
+| `src/services/` | Business rules: mastery math, unlock status, SRS scheduling, gamification, tutor prompt building |
+| `src/repositories/` | All Diesel/SQL access, one module per domain |
+| `src/models/` | Database entity structs (one module per domain) |
+| `src/middleware/` | Cross-cutting HTTP: `AuthUser` extractor, rate limiters |
+| `src/errors.rs` / `src/db.rs` / `src/jwt.rs` / `src/password.rs` | Shared plumbing |
+
+`cargo check` / `cargo clippy` / `cargo test` (24 tests) are all clean. The
+HTTP contract (routes, JSON shapes, status codes) is stable — the mobile app
+is the only consumer and must keep working across refactors.
+
 All endpoints below require `Authorization: Bearer <token>` except `register` and `login`.
 
 ### Auth

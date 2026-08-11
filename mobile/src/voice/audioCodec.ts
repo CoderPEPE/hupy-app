@@ -57,6 +57,22 @@ export function resample(
   return out;
 }
 
+/**
+ * Root-mean-square level of a Float32 frame, in [0, 1].
+ *
+ * Used as a cheap loudness estimate to tell real speech from speaker echo
+ * bleeding back into the microphone (see the echo gate in
+ * `useVoiceConversation`).
+ */
+export function rms(samples: Float32Array): number {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) {
+    sum += samples[i] * samples[i];
+  }
+  return Math.sqrt(sum / samples.length);
+}
+
 /** Converts Float32 samples in [-1, 1] to base64-encoded PCM16 little-endian. */
 export function float32ToPcm16Base64(samples: Float32Array): string {
   const bytes = new Uint8Array(samples.length * 2);
