@@ -160,6 +160,8 @@ export const en = {
   'flashcards.ratingMedium': 'Medium',
   'flashcards.ratingEasy': 'Easy',
   'flashcards.planetFallback': 'Planet',
+  'flashcards.pendingRecheck': "Marked easy — Huppy will double-check this live",
+  'flashcards.structureBack': 'Structure',
 
   // Planets
   'planets.audioModeEnglishOnly': 'English only',
@@ -170,6 +172,7 @@ export const en = {
   'planets.tapToListen': 'Tap play to listen',
   'planets.couldNotLoadAudio': 'Could not load audio',
   'planets.listening': 'Listening…',
+  'planets.yourTurn': 'Your turn — repeat it now…',
   'planets.continuousAudio': 'Continuous audio',
   'planets.forTheCarOne': 'for the car · {{count}} sentence',
   'planets.forTheCarOther': 'for the car · {{count}} sentences',

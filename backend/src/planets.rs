@@ -81,16 +81,6 @@ impl PlanetProgress {
     }
 }
 
-const METRICS: [&str; 7] = [
-    "sentences",
-    "pronunciation",
-    "conversation",
-    "listening",
-    "flashcards",
-    "review",
-    "mastery",
-];
-
 // ---------------------------------------------------------------------------
 // Response shapes
 // ---------------------------------------------------------------------------
@@ -215,7 +205,7 @@ fn lesson_completed(kind: &str, mastery: f64) -> bool {
 /// Computes the display status + unlock progress for a planet given the
 /// previous planet's mastery (locked planets only unlock via mastery).
 /// `prev` is (previous planet mastery, previous unlock threshold).
-fn status_for(mastery: f64, unlock_mastery: f64, prev: Option<(f64, f64)>) -> (String, f64) {
+pub(crate) fn status_for(mastery: f64, unlock_mastery: f64, prev: Option<(f64, f64)>) -> (String, f64) {
     if mastery >= unlock_mastery {
         return ("completed".into(), 1.0);
     }
@@ -263,6 +253,249 @@ mod tests {
         assert_eq!(status, "locked");
         assert!((unlock - 0.5).abs() < 1e-9);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Shared mastery computation — used by the HTTP progress-bump endpoint, by
+// sentence mastery, by flashcard review, and by the Realtime tutor's tools.
+// `mastery` is never set directly: it is always the average of the other 6
+// tracked metrics, recomputed every time one of them changes.
+// ---------------------------------------------------------------------------
+
+pub(crate) const BUMPABLE_METRICS: [&str; 4] = ["pronunciation", "conversation", "listening", "review"];
+
+fn compute_mastery(p: &PlanetProgress) -> f64 {
+    (p.sentences + p.pronunciation + p.conversation + p.listening + p.flashcards + p.review) / 6.0
+}
+
+fn with_metric(mut p: PlanetProgress, metric: &str, value: f64) -> PlanetProgress {
+    let value = value.clamp(0.0, 1.0);
+    match metric {
+        "sentences" => p.sentences = value,
+        "pronunciation" => p.pronunciation = value,
+        "conversation" => p.conversation = value,
+        "listening" => p.listening = value,
+        "flashcards" => p.flashcards = value,
+        "review" => p.review = value,
+        _ => {}
+    }
+    p.mastery = compute_mastery(&p);
+    p
+}
+
+#[cfg(test)]
+mod mastery_tests {
+    use super::{with_metric, PlanetProgress};
+    use uuid::Uuid;
+
+    #[test]
+    fn mastery_is_the_average_of_six_submetrics() {
+        let mut p = PlanetProgress::empty(Uuid::nil());
+        p.sentences = 1.0;
+        p.pronunciation = 0.5;
+        p.conversation = 0.5;
+        p.listening = 0.0;
+        p.flashcards = 0.0;
+        p.review = 0.0;
+        let p = with_metric(p, "review", 0.0); // no-op change, just triggers recompute
+        assert!((p.mastery - 1.0 / 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn with_metric_clamps_to_0_1_and_recomputes_mastery() {
+        let p = PlanetProgress::empty(Uuid::nil());
+        let p = with_metric(p, "pronunciation", 5.0);
+        assert_eq!(p.pronunciation, 1.0);
+        assert!((p.mastery - 1.0 / 6.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn unknown_metric_leaves_values_unchanged_but_still_recomputes() {
+        let p = PlanetProgress::empty(Uuid::nil());
+        let p = with_metric(p, "not_a_real_metric", 0.9);
+        assert_eq!(p.mastery, 0.0);
+    }
+}
+
+async fn store_progress(pool: &crate::db::DbPool, user_id: Uuid, p: PlanetProgress) -> Result<(), AppError> {
+    let planet_id = p.planet_id;
+    run_db(pool, move |conn| {
+        diesel::insert_into(user_planet_progress::table)
+            .values((
+                user_planet_progress::user_id.eq(user_id),
+                user_planet_progress::planet_id.eq(planet_id),
+                user_planet_progress::sentences.eq(p.sentences),
+                user_planet_progress::pronunciation.eq(p.pronunciation),
+                user_planet_progress::conversation.eq(p.conversation),
+                user_planet_progress::listening.eq(p.listening),
+                user_planet_progress::flashcards.eq(p.flashcards),
+                user_planet_progress::review.eq(p.review),
+                user_planet_progress::mastery.eq(p.mastery),
+            ))
+            .on_conflict((user_planet_progress::user_id, user_planet_progress::planet_id))
+            .do_update()
+            .set((
+                user_planet_progress::sentences.eq(p.sentences),
+                user_planet_progress::pronunciation.eq(p.pronunciation),
+                user_planet_progress::conversation.eq(p.conversation),
+                user_planet_progress::listening.eq(p.listening),
+                user_planet_progress::flashcards.eq(p.flashcards),
+                user_planet_progress::review.eq(p.review),
+                user_planet_progress::mastery.eq(p.mastery),
+            ))
+            .execute(conn)?;
+        Ok(())
+    })
+    .await
+}
+
+/// Sets one metric to an absolute value (0..1) and recomputes `mastery` as the
+/// average of all 6 sub-metrics. Used for metrics that reflect real, countable
+/// state (sentences mastered, flashcards graduated) rather than a delta.
+pub(crate) async fn set_metric_absolute(
+    pool: &crate::db::DbPool,
+    user_id: Uuid,
+    planet_id: Uuid,
+    metric: &str,
+    value: f64,
+) -> Result<f64, AppError> {
+    let current = load_progress(pool, user_id, planet_id).await?;
+    let updated = with_metric(current, metric, value);
+    let mastery = updated.mastery;
+    store_progress(pool, user_id, updated).await?;
+    Ok(mastery)
+}
+
+/// Bumps one metric by a delta (clamped to 0..1) and recomputes `mastery`.
+/// Used for the AI's qualitative judgment calls (pronunciation, conversation,
+/// listening, review) made during a live session.
+pub(crate) async fn bump_metric_delta(
+    pool: &crate::db::DbPool,
+    user_id: Uuid,
+    planet_id: Uuid,
+    metric: &str,
+    delta: f64,
+) -> Result<f64, AppError> {
+    let current = load_progress(pool, user_id, planet_id).await?;
+    let next = current.metric(metric) + delta;
+    set_metric_absolute(pool, user_id, planet_id, metric, next).await
+}
+
+/// A planet the tutor can teach: enough for building the Realtime prompt.
+pub(crate) struct ActivePlanet {
+    pub id: Uuid,
+    pub number: i32,
+    pub title: String,
+}
+
+/// The user's current planet: the first one whose status isn't "completed"
+/// (mirrors `status_for`'s own logic, so it's always exactly the planet the
+/// Planets tab shows as "active"). Falls back to the last planet if every
+/// planet has been completed.
+pub(crate) async fn active_planet_for(pool: &crate::db::DbPool, user_id: Uuid) -> Result<ActivePlanet, AppError> {
+    run_db(pool, move |conn| {
+        let all: Vec<Planet> = planets::table.order(planets::number.asc()).load(conn)?;
+        let mut prev: Option<(f64, f64)> = None;
+        let mut chosen: Option<&Planet> = None;
+        for p in &all {
+            let prog = user_planet_progress::table
+                .find((user_id, p.id))
+                .first::<PlanetProgress>(conn)
+                .optional()?
+                .unwrap_or_else(|| PlanetProgress::empty(p.id));
+            let (status, _) = status_for(prog.mastery, p.unlock_mastery, prev);
+            prev = Some((prog.mastery, p.unlock_mastery));
+            if status != "completed" && chosen.is_none() {
+                chosen = Some(p);
+            }
+        }
+        let planet = chosen.or_else(|| all.last());
+        match planet {
+            Some(p) => Ok(ActivePlanet { id: p.id, number: p.number, title: p.title.clone() }),
+            None => Err(AppError::internal("no planets configured")),
+        }
+    })
+    .await
+}
+
+/// One sentence from the active planet, with whether this user has mastered it.
+pub(crate) struct TutorSentence {
+    pub id: Uuid,
+    pub en: String,
+    pub pt: String,
+    pub subject: String,
+    pub verb: String,
+    pub complement: String,
+    pub mastered: bool,
+}
+
+pub(crate) async fn tutor_sentences_for(
+    pool: &crate::db::DbPool,
+    user_id: Uuid,
+    planet_id: Uuid,
+) -> Result<Vec<TutorSentence>, AppError> {
+    run_db(pool, move |conn| {
+        let mastered_ids: std::collections::HashSet<Uuid> = user_sentence_progress::table
+            .inner_join(planet_sentences::table.on(planet_sentences::id.eq(user_sentence_progress::sentence_id)))
+            .filter(user_sentence_progress::user_id.eq(user_id))
+            .filter(planet_sentences::planet_id.eq(planet_id))
+            .filter(user_sentence_progress::mastered.eq(true))
+            .select(user_sentence_progress::sentence_id)
+            .load(conn)?
+            .into_iter()
+            .collect();
+
+        let rows: Vec<(Uuid, String, String, String, String, String)> = planet_sentences::table
+            .filter(planet_sentences::planet_id.eq(planet_id))
+            .order(planet_sentences::position.asc())
+            .select((
+                planet_sentences::id,
+                planet_sentences::en,
+                planet_sentences::pt,
+                planet_sentences::subject,
+                planet_sentences::verb,
+                planet_sentences::complement,
+            ))
+            .load(conn)?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(id, en, pt, subject, verb, complement)| TutorSentence {
+                mastered: mastered_ids.contains(&id),
+                id,
+                en,
+                pt,
+                subject,
+                verb,
+                complement,
+            })
+            .collect())
+    })
+    .await
+}
+
+/// A sample of sentences the user already mastered on earlier (lower-numbered)
+/// planets, for the tutor to weave in as cumulative review. Not exhaustive —
+/// just enough to remind the model this content should keep resurfacing.
+pub(crate) async fn cumulative_review_sample(
+    pool: &crate::db::DbPool,
+    user_id: Uuid,
+    before_planet_number: i32,
+    limit: i64,
+) -> Result<Vec<(String, String)>, AppError> {
+    run_db(pool, move |conn| {
+        Ok(user_sentence_progress::table
+            .inner_join(planet_sentences::table.on(planet_sentences::id.eq(user_sentence_progress::sentence_id)))
+            .inner_join(planets::table.on(planets::id.eq(planet_sentences::planet_id)))
+            .filter(user_sentence_progress::user_id.eq(user_id))
+            .filter(user_sentence_progress::mastered.eq(true))
+            .filter(planets::number.lt(before_planet_number))
+            .order(planets::number.desc())
+            .select((planet_sentences::en, planet_sentences::pt))
+            .limit(limit)
+            .load(conn)?)
+    })
+    .await
 }
 
 /// Loads a planet's progress row for a user (defaults to zeros).
@@ -606,17 +839,23 @@ pub struct ProgressBump {
     pub delta: f64,
 }
 
-/// Bumps one progress metric for the current planet (clamped to 0..1) and
-/// returns the updated planet summary (so the client can refresh unlock state).
+/// Bumps one progress metric for the current planet (clamped to 0..1),
+/// recomputes `mastery` as the average of all 6 sub-metrics, and returns the
+/// updated planet summary (so the client can refresh unlock state).
+///
+/// Only the AI's qualitative judgment metrics are bumpable here —
+/// `sentences` and `flashcards` are derived from real counts elsewhere
+/// (`master_sentence`, flashcard review), and `mastery` is never set
+/// directly; it's always the computed average.
 async fn bump_progress(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path(planet_id): Path<Uuid>,
     Json(body): Json<ProgressBump>,
 ) -> Result<Json<PlanetSummary>, AppError> {
-    if !METRICS.contains(&body.metric.as_str()) {
+    if !BUMPABLE_METRICS.contains(&body.metric.as_str()) {
         return Err(AppError::bad_request(format!(
-            "unknown metric '{}'; expected one of {METRICS:?}",
+            "unknown metric '{}'; expected one of {BUMPABLE_METRICS:?}",
             body.metric
         )));
     }
@@ -626,53 +865,10 @@ async fn bump_progress(
         ));
     }
 
-    run_db(&state.pool, move |conn| {
-        let current = user_planet_progress::table
-            .find((user_id, planet_id))
-            .first::<PlanetProgress>(conn)
-            .optional()?
-            .unwrap_or_else(|| PlanetProgress::empty(planet_id));
-
-        // Compute the post-bump value for every metric (only one changes).
-        let next = (current.metric(&body.metric) + body.delta).clamp(0.0, 1.0);
-        let (n_s, n_pr, n_c, n_l, n_f, n_r, n_m) = match body.metric.as_str() {
-            "sentences" => (next, current.pronunciation, current.conversation, current.listening, current.flashcards, current.review, current.mastery),
-            "pronunciation" => (current.sentences, next, current.conversation, current.listening, current.flashcards, current.review, current.mastery),
-            "conversation" => (current.sentences, current.pronunciation, next, current.listening, current.flashcards, current.review, current.mastery),
-            "listening" => (current.sentences, current.pronunciation, current.conversation, next, current.flashcards, current.review, current.mastery),
-            "flashcards" => (current.sentences, current.pronunciation, current.conversation, current.listening, next, current.review, current.mastery),
-            "review" => (current.sentences, current.pronunciation, current.conversation, current.listening, current.flashcards, next, current.mastery),
-            _ => (current.sentences, current.pronunciation, current.conversation, current.listening, current.flashcards, current.review, next),
-        };
-
-        // Upsert the progress row (all columns, so the conflict update is type-safe).
-        diesel::insert_into(user_planet_progress::table)
-            .values((
-                user_planet_progress::user_id.eq(user_id),
-                user_planet_progress::planet_id.eq(planet_id),
-                user_planet_progress::sentences.eq(n_s),
-                user_planet_progress::pronunciation.eq(n_pr),
-                user_planet_progress::conversation.eq(n_c),
-                user_planet_progress::listening.eq(n_l),
-                user_planet_progress::flashcards.eq(n_f),
-                user_planet_progress::review.eq(n_r),
-                user_planet_progress::mastery.eq(n_m),
-            ))
-            .on_conflict((user_planet_progress::user_id, user_planet_progress::planet_id))
-            .do_update()
-            .set((
-                user_planet_progress::sentences.eq(n_s),
-                user_planet_progress::pronunciation.eq(n_pr),
-                user_planet_progress::conversation.eq(n_c),
-                user_planet_progress::listening.eq(n_l),
-                user_planet_progress::flashcards.eq(n_f),
-                user_planet_progress::review.eq(n_r),
-                user_planet_progress::mastery.eq(n_m),
-            ))
-            .execute(conn)?;
-        Ok(())
-    })
-    .await?;
+    bump_metric_delta(&state.pool, user_id, planet_id, &body.metric, body.delta).await?;
+    if body.delta > 0.0 {
+        crate::gamification::touch_activity_and_award_xp(&state.pool, user_id, 1).await;
+    }
 
     // Recompute the full summary so unlock status reflects the new mastery.
     let planet: Planet = run_db(&state.pool, move |conn| {
@@ -736,7 +932,7 @@ async fn master_sentence(
     Path((planet_id, sentence_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<SentenceMaster>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    run_db(&state.pool, move |conn| {
+    let run_result = run_db(&state.pool, move |conn| {
         // The sentence must exist and belong to the given planet.
         let belongs: i64 = planet_sentences::table
             .filter(planet_sentences::id.eq(sentence_id))
@@ -772,26 +968,22 @@ async fn master_sentence(
 
         let sentences_metric = if total > 0 { mastered as f64 / total as f64 } else { 0.0 };
 
-        // Reflect the mastered-sentences ratio in the progress row.
-        diesel::insert_into(user_planet_progress::table)
-            .values((
-                user_planet_progress::user_id.eq(user_id),
-                user_planet_progress::planet_id.eq(planet_id),
-                user_planet_progress::sentences.eq(sentences_metric),
-            ))
-            .on_conflict((user_planet_progress::user_id, user_planet_progress::planet_id))
-            .do_update()
-            .set(user_planet_progress::sentences.eq(sentences_metric))
-            .execute(conn)?;
-
-        Ok(serde_json::json!({
-            "sentence_id": sentence_id,
-            "mastered": body.mastered,
-            "mastered_sentences": mastered,
-            "total_sentences": total,
-            "progress": { "sentences": sentences_metric },
-        }))
+        Ok((mastered, total, sentences_metric))
     })
-    .await
-    .map(Json)
+    .await?;
+
+    let (mastered, total, sentences_metric) = run_result;
+    set_metric_absolute(&state.pool, user_id, planet_id, "sentences", sentences_metric).await?;
+
+    if body.mastered {
+        crate::gamification::touch_activity_and_award_xp(&state.pool, user_id, 8).await;
+    }
+
+    Ok(Json(serde_json::json!({
+        "sentence_id": sentence_id,
+        "mastered": body.mastered,
+        "mastered_sentences": mastered,
+        "total_sentences": total,
+        "progress": { "sentences": sentences_metric },
+    })))
 }

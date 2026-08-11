@@ -3,6 +3,7 @@ mod conversations;
 mod db;
 mod errors;
 mod flashcards;
+mod gamification;
 mod jwt;
 mod models;
 mod password;
@@ -75,6 +76,7 @@ async fn main() {
         .nest("/api/planets", planets::router())
         .nest("/api/conversations", conversations::router())
         .nest("/api/flashcards", flashcards::router())
+        .nest("/api/gamification", gamification::router())
         .nest("/api/tts", tts::router(state.clone()))
         .layer(cors)
         .layer(TraceLayer::new_for_http())

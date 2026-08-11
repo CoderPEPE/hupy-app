@@ -162,6 +162,8 @@ export const ptBR: Translations = {
   'flashcards.ratingMedium': 'Médio',
   'flashcards.ratingEasy': 'Fácil',
   'flashcards.planetFallback': 'Planeta',
+  'flashcards.pendingRecheck': 'Marcado como fácil — a Huppy vai confirmar isso ao vivo',
+  'flashcards.structureBack': 'Estrutura',
 
   // Planets
   'planets.audioModeEnglishOnly': 'Só inglês',
@@ -172,6 +174,7 @@ export const ptBR: Translations = {
   'planets.tapToListen': 'Toque em play para ouvir',
   'planets.couldNotLoadAudio': 'Não foi possível carregar o áudio',
   'planets.listening': 'Ouvindo…',
+  'planets.yourTurn': 'Sua vez — repita agora…',
   'planets.continuousAudio': 'Áudio contínuo',
   'planets.forTheCarOne': 'para o carro · {{count}} frase',
   'planets.forTheCarOther': 'para o carro · {{count}} frases',

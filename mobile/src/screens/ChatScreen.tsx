@@ -4,7 +4,6 @@ import {
   ListChecks,
   Loader2,
   LogOut,
-  Mic,
   Sparkles,
   Volume2,
   Square,
@@ -21,38 +20,32 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppTabBar } from '../components/AppTabBar';
+import { Confetti } from '../components/Confetti';
 import { LanguageSwitch } from '../components/LanguageSwitch';
+import { Mascot } from '../components/Mascot';
+import { StreakXpBar } from '../components/StreakXpBar';
 import {
   useAddCorrection,
   useAddMessage,
   useBumpProgress,
+  useConfirmFlashcardMastery,
   useConversation,
   useConversations,
   useCorrectionToCard,
   useCreateConversation,
-  useLesson,
+  useCreateFlashcard,
+  useGamificationStats,
+  useMasterSentence,
   usePlanets,
 } from '../api/hooks';
+import type { ProgressMetric } from '../api/planets';
 import { localeTag, plural, useI18nStore, useT } from '../i18n';
 import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing } from '../theme';
-import { useVoiceConversation } from '../voice/useVoiceConversation';
+import { useVoiceConversation, type ToolCallHandler } from '../voice/useVoiceConversation';
 import { speechPlayer } from '../voice/ttsPlayer';
-import type { ChatMessage, ConversationSummary, LessonCorrection, LessonStep } from '../types';
-
-type Mode = 'demo' | 'live';
-
-function stepToTutorMessage(step: LessonStep, index: number): ChatMessage {
-  return {
-    id: `lesson-${step.id ?? index}`,
-    role: 'tutor',
-    kind: step.kind,
-    text: step.tutor,
-    time: '',
-    correction: step.correction ?? undefined,
-  };
-}
+import type { ChatMessage, ConversationSummary, LessonCorrection, LessonStepKind } from '../types';
 
 function CorrectionCard({
   correction,
@@ -169,6 +162,13 @@ function MessageBubble({ message }: { message: ChatMessage }) {
   );
 }
 
+function asString(v: unknown): string {
+  return typeof v === 'string' ? v : '';
+}
+function asOptionalString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length > 0 ? v : undefined;
+}
+
 export function ChatScreen() {
   const insets = useSafeAreaInsets();
   const t = useT();
@@ -177,42 +177,41 @@ export function ChatScreen() {
   const signOut = useAuthStore((s) => s.signOut);
   const { unlockNotice, clearUnlockNotice, setUnlockNotice, lessonPlanetId } = useUiStore();
 
-  // Real voice engine (OpenAI Realtime) — fully functional.
-  const voice = useVoiceConversation();
-
   const { data: planets = [] } = usePlanets();
   // The Planets tab can pick a planet via "Continue lesson"; otherwise the
-  // first active (or first overall) planet drives the demo lesson.
+  // first active (or first overall) planet is what the tutor teaches —
+  // matches the backend's own `active_planet_for` so the transcript header
+  // never disagrees with what the live session is actually scoped to.
   const planet =
     (lessonPlanetId ? planets.find((p) => p.id === lessonPlanetId) : undefined) ??
     planets.find((p) => p.status === 'active') ??
     planets[0] ??
     null;
-  const lessonQuery = useLesson(planet?.id);
-  const demoSteps = lessonQuery.data?.steps ?? [];
 
-  const bumpProgress = useBumpProgress();
   const createConversation = useCreateConversation();
   const addMessage = useAddMessage();
   const addCorrection = useAddCorrection();
+  const createFlashcard = useCreateFlashcard();
+  const masterSentence = useMasterSentence();
+  const bumpProgress = useBumpProgress();
+  const confirmFlashcardMastery = useConfirmFlashcardMastery();
+  const { data: gamification } = useGamificationStats();
 
-  const [mode, setMode] = useState<Mode>('demo');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [lessonIndex, setLessonIndex] = useState(0);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
-  const [demoPlaying, setDemoPlaying] = useState(true);
-  const pendingTimeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [confettiKey, setConfettiKey] = useState(0);
   const scrollRef = useRef<ScrollView>(null);
   const pulse = useRef(new Animated.Value(0)).current;
-  // Source of truth for the demo lesson position (state mirrors it for UI).
-  const lessonIndexRef = useRef(0);
-  const messagesRef = useRef<ChatMessage[]>([]);
 
-  // One backend conversation per session (demo or live) — created lazily.
+  // One backend conversation per session — created once, on mount.
   const conversationIdRef = useRef<string | null>(null);
   const persistedMessagesRef = useRef<Set<string>>(new Set());
   const prevStatusesRef = useRef<string[]>([]);
+  const prevBadgeCountRef = useRef<number | null>(null);
+  const hasAutoStartedRef = useRef(false);
+  const planetRef = useRef(planet);
+  planetRef.current = planet;
 
   const firstName = user?.email.split('@')[0] ?? t('chat.guestName');
 
@@ -228,143 +227,129 @@ export function ChatScreen() {
   /** Creates (once) and returns the backend conversation for this session. */
   const ensureConversation = async (): Promise<string | null> => {
     if (conversationIdRef.current) return conversationIdRef.current;
-    if (!planet) return null;
+    const p = planetRef.current;
+    if (!p) return null;
     try {
       const conv = await createConversation.mutateAsync({
-        title:
-          mode === 'live'
-            ? t('chat.history.liveConversationTitle')
-            : t('chat.history.lessonTitle', { number: planet.number }),
-        planetId: planet.id,
+        title: t('chat.history.liveConversationTitle'),
+        planetId: p.id,
       });
       conversationIdRef.current = conv.id;
       return conv.id;
     } catch {
-      return null; // offline: demo still works locally, nothing persisted
+      return null; // offline: voice still works, nothing persisted
     }
   };
 
-  /** Persists a tutor step (message + optional correction) to the conversation. */
-  const persistTutorStep = async (step: LessonStep, index: number) => {
-    const convId = await ensureConversation();
-    if (!convId) return;
-    try {
-      await addMessage.mutateAsync({ conversationId: convId, role: 'assistant', text: step.tutor, kind: step.kind });
-      if (step.correction) {
+  /**
+   * The tutor's Realtime tool calls land here and are turned into real
+   * writes — this is what makes corrections, flashcards, sentence mastery,
+   * and progress genuinely earned during a live conversation instead of a
+   * scripted replay.
+   */
+  const onToolCall: ToolCallHandler = async (name, args) => {
+    const p = planetRef.current;
+    switch (name) {
+      case 'record_correction': {
+        const convId = await ensureConversation();
+        if (!convId) return { error: 'no active conversation' };
         const corr = await addCorrection.mutateAsync({
           conversationId: convId,
-          said: step.correction.said,
-          corrected: step.correction.corrected,
-          explanation: step.correction.explanation,
-          pt: step.correction.pt,
-          mistakePart: step.correction.mistake_part,
-          subject: step.correction.subject,
-          verb: step.correction.verb,
-          complement: step.correction.complement,
+          said: asString(args.said),
+          corrected: asString(args.corrected),
+          explanation: asString(args.explanation_pt),
+          pt: asOptionalString(args.explanation_pt),
+          mistakePart: asOptionalString(args.mistake_part),
+          subject: asOptionalString(args.subject),
+          verb: asOptionalString(args.verb),
+          complement: asOptionalString(args.complement),
         });
-        // Attach the persisted correction id so "Make a card" can use it.
-        setMessages((prev) =>
-          prev.map((m, i) =>
-            i === index && m.correction ? { ...m, correction: { ...m.correction, id: corr.id } } : m,
-          ),
-        );
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `correction-${corr.id}`,
+            role: 'tutor',
+            text: t('chat.correction.title'),
+            time: '',
+            kind: 'correction' as LessonStepKind,
+            correction: {
+              id: corr.id,
+              said: corr.said,
+              corrected: corr.corrected,
+              explanation: corr.explanation,
+              pt: corr.pt,
+              mistake_part: corr.mistake_part,
+              subject: corr.subject,
+              verb: corr.verb,
+              complement: corr.complement,
+            },
+          },
+        ]);
+        return { ok: true, correction_id: corr.id };
       }
-    } catch {
-      // persistence is best-effort; the lesson keeps playing either way
+      case 'create_flashcard': {
+        const card = await createFlashcard.mutateAsync({
+          en: asString(args.en),
+          pt: asString(args.pt),
+          explanation: asOptionalString(args.explanation_pt),
+          subject: asOptionalString(args.subject),
+          verb: asOptionalString(args.verb),
+          complement: asOptionalString(args.complement),
+          planetId: p?.id,
+        });
+        return { ok: true, flashcard_id: card.id };
+      }
+      case 'master_sentence': {
+        const sentenceId = asOptionalString(args.sentence_id);
+        if (!p || !sentenceId) return { error: 'missing planet or sentence_id' };
+        await masterSentence.mutateAsync({ planetId: p.id, sentenceId, mastered: true });
+        return { ok: true };
+      }
+      case 'bump_progress': {
+        const metric = asOptionalString(args.metric) as ProgressMetric | undefined;
+        const delta = typeof args.delta === 'number' ? args.delta : undefined;
+        if (!p || !metric || delta === undefined) return { error: 'missing planet, metric, or delta' };
+        await bumpProgress.mutateAsync({ planetId: p.id, metric, delta });
+        return { ok: true };
+      }
+      case 'confirm_flashcard_mastery': {
+        const flashcardId = asOptionalString(args.flashcard_id);
+        if (!flashcardId) return { error: 'missing flashcard_id' };
+        await confirmFlashcardMastery.mutateAsync(flashcardId);
+        return { ok: true };
+      }
+      default:
+        return { error: `unknown tool ${name}` };
     }
   };
 
-  const persistUserMessage = async (text: string) => {
-    const convId = await ensureConversation();
-    if (!convId) return;
-    try {
-      await addMessage.mutateAsync({ conversationId: convId, role: 'user', text });
-    } catch {
-      // best-effort
-    }
-  };
+  const voice = useVoiceConversation(onToolCall);
 
-  // Keep a mutable ref of the transcript so the interval can append reliably.
+  // Merge the voice engine's transcript into the local message list without
+  // clobbering tool-call-originated messages (corrections) appended above:
+  // update existing entries in place, append genuinely new ones.
   useEffect(() => {
-    messagesRef.current = messages;
-  }, [messages]);
-
-  // Demo mode: replay the DB lesson step by step (pausable) + persist.
-  // Side effects run in the tick body, never inside a state updater, so
-  // StrictMode double-invoking updaters cannot double-persist or double-bump.
-  useEffect(() => {
-    if (mode !== 'demo' || !demoPlaying || demoSteps.length === 0) return;
-    const t = setInterval(() => {
-      const i = lessonIndexRef.current;
-      if (i >= demoSteps.length) {
-        clearInterval(t);
-        return;
+    if (voice.messages.length === 0) return;
+    setMessages((prev) => {
+      const byId = new Map(voice.messages.map((m) => [m.id, m] as const));
+      const next = prev.map((m) => {
+        const vm = byId.get(m.id);
+        return vm ? { ...m, text: vm.text, partial: vm.partial } : m;
+      });
+      const seen = new Set(next.map((m) => m.id));
+      for (const vm of voice.messages) {
+        if (!seen.has(vm.id)) {
+          next.push({ id: vm.id, role: vm.role, text: vm.text, time: '', partial: vm.partial });
+          seen.add(vm.id);
+        }
       }
-      const step = demoSteps[i];
-      const msgIndex = messagesRef.current.length; // position in the transcript
-      const tutorMsg = stepToTutorMessage(step, i);
-      setMessages((prev) => [...prev, tutorMsg]);
-      lessonIndexRef.current = i + 1;
-      setLessonIndex(i + 1);
+      return next;
+    });
+  }, [voice.messages]);
 
-      persistTutorStep(step, msgIndex);
-      if (step.mastery_gain && planet) {
-        bumpProgress.mutate({ planetId: planet.id, metric: 'mastery', delta: step.mastery_gain });
-      }
-      if (step.expected) {
-        const expected = step.expected;
-        const to = setTimeout(() => {
-          const now = new Date();
-          const time = `${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
-          const msg: ChatMessage = {
-            id: `user-${i}-${Date.now()}`,
-            role: 'user',
-            text: expected,
-            time,
-          };
-          setMessages((prev) => [...prev, msg]);
-          persistUserMessage(expected);
-        }, 2200);
-        pendingTimeouts.current.push(to);
-      }
-    }, 5000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, demoPlaying, demoSteps, planet]);
-
-  // Auto-pause once the demo lesson has been fully replayed.
+  // Persist finalized voice messages to the conversation.
   useEffect(() => {
-    if (mode === 'demo' && demoSteps.length > 0 && lessonIndex >= demoSteps.length) {
-      setDemoPlaying(false);
-    }
-  }, [lessonIndex, mode, demoSteps]);
-
-  // Clear any pending simulated replies on unmount.
-  useEffect(() => {
-    return () => {
-      pendingTimeouts.current.forEach((to) => clearTimeout(to));
-      speechPlayer.stop();
-    };
-  }, []);
-
-  // Live mode: show the real transcript from the voice engine.
-  useEffect(() => {
-    if (mode === 'live' && voice.messages.length > 0) {
-      setMessages(
-        voice.messages.map((m) => ({
-          id: m.id,
-          role: m.role,
-          text: m.text,
-          time: '',
-          partial: m.partial,
-        })),
-      );
-    }
-  }, [mode, voice.messages]);
-
-  // Live mode: persist finalized voice messages to the conversation.
-  useEffect(() => {
-    if (mode !== 'live' || !conversationIdRef.current) return;
+    if (!conversationIdRef.current) return;
     voice.messages.forEach((m) => {
       if (m.partial || persistedMessagesRef.current.has(m.id)) return;
       if (!m.text.trim()) return; // nothing to persist yet — skip, don't burn the id
@@ -375,9 +360,23 @@ export function ChatScreen() {
         text: m.text,
       });
     });
-  }, [mode, voice.messages, addMessage]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voice.messages, addMessage]);
 
-  // Surface an unlock banner when a locked planet becomes active.
+  // Auto-activate the mic the moment we know which planet to teach — no
+  // buttons, per spec. Runs once per screen mount.
+  useEffect(() => {
+    if (hasAutoStartedRef.current || !planet) return;
+    hasAutoStartedRef.current = true;
+    (async () => {
+      await ensureConversation();
+      voice.start();
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planet]);
+
+  // Surface an unlock banner (with a confetti burst) when a locked planet
+  // becomes active — this only fires from real, server-computed mastery now.
   useEffect(() => {
     const statuses = planets.map((p) => p.status);
     const prev = prevStatusesRef.current;
@@ -386,52 +385,46 @@ export function ChatScreen() {
       statuses.forEach((s, i) => {
         if (prev[i] === 'locked' && s === 'active' && planets[i]) {
           setUnlockNotice(t('chat.unlockNotice', { number: planets[i].number }));
+          setConfettiKey(Date.now());
         }
       });
     }
   }, [planets, setUnlockNotice, t]);
 
+  // Celebrate a newly-earned badge the same way.
+  useEffect(() => {
+    if (!gamification) return;
+    const count = gamification.badges.length;
+    if (prevBadgeCountRef.current !== null && count > prevBadgeCountRef.current) {
+      setConfettiKey(Date.now());
+    }
+    prevBadgeCountRef.current = count;
+  }, [gamification]);
+
   useEffect(() => {
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
   }, [messages]);
 
-  const switchMode = (next: Mode) => {
-    if (next === mode) return;
-    if (mode === 'live') voice.stop();
-    setMode(next);
-    setMessages([]);
-    messagesRef.current = [];
-    setLessonIndex(0);
-    lessonIndexRef.current = 0;
-    setDemoPlaying(true);
-    conversationIdRef.current = null;
-    persistedMessagesRef.current = new Set();
-    pendingTimeouts.current.forEach((to) => clearTimeout(to));
-    pendingTimeouts.current = [];
-  };
+  // Tear down on unmount so a background/backgrounded screen doesn't keep
+  // streaming mic audio.
+  useEffect(() => {
+    return () => {
+      voice.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const isLive = mode === 'live';
-  const liveActive = isLive && voice.status !== 'idle' && voice.status !== 'error';
-  const orbLabel = isLive
-    ? voice.status === 'connecting'
+  const liveActive = voice.status !== 'idle' && voice.status !== 'error';
+  const orbLabel =
+    voice.status === 'connecting'
       ? t('chat.orb.connecting')
       : voice.status === 'speaking'
         ? t('chat.orb.stop')
         : liveActive
           ? t('chat.orb.stop')
-          : t('chat.orb.start')
-    : demoPlaying
-      ? t('chat.orb.stop')
-      : t('chat.orb.play');
+          : t('chat.orb.start');
 
   const onOrbPress = async () => {
-    if (mode === 'demo') {
-      // Pause / resume the scripted lesson.
-      pendingTimeouts.current.forEach((to) => clearTimeout(to));
-      pendingTimeouts.current = [];
-      setDemoPlaying((p) => !p);
-      return;
-    }
     if (voice.status === 'speaking') {
       voice.interrupt(); // barge-in: cut the tutor off
       return;
@@ -440,26 +433,18 @@ export function ChatScreen() {
       voice.stop();
       return;
     }
-    // Every live session gets its own fresh conversation, then go live.
-    conversationIdRef.current = null;
-    persistedMessagesRef.current = new Set();
     await ensureConversation();
     voice.start();
   };
 
-  const liveHint = isLive
-    ? voice.status === 'connecting'
+  const liveHint =
+    voice.status === 'connecting'
       ? t('chat.hint.connecting')
       : voice.status === 'speaking'
         ? t('chat.hint.tutorSpeaking')
         : liveActive
           ? t('chat.hint.micLive')
-          : t('chat.hint.tapToStart')
-    : demoPlaying
-      ? t('chat.hint.demoPause')
-      : t('chat.hint.demoResume');
-
-  const lessonLoaded = mode === 'demo' && demoSteps.length === 0;
+          : t('chat.hint.tapToStart');
 
   return (
     <View style={styles.screen}>
@@ -476,6 +461,7 @@ export function ChatScreen() {
           </View>
         </View>
         <View style={styles.headerRight}>
+          <StreakXpBar />
           <LanguageSwitch />
           <Pressable
             style={styles.headerIconBtn}
@@ -485,21 +471,6 @@ export function ChatScreen() {
           >
             <LogOut size={18} color={colors.textMuted} />
           </Pressable>
-          <View style={styles.modeSwitch}>
-            <Pressable
-              style={[styles.modeBtn, mode === 'demo' && styles.modeBtnActive]}
-              onPress={() => switchMode('demo')}
-            >
-              <Text style={[styles.modeText, mode === 'demo' && styles.modeTextActive]}>{t('chat.modeDemo')}</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.modeBtn, mode === 'live' && styles.modeBtnActive]}
-              onPress={() => switchMode('live')}
-            >
-              <Mic size={13} color={mode === 'live' ? colors.textOnPrimary : colors.textMuted} />
-              <Text style={[styles.modeText, mode === 'live' && styles.modeTextActive]}>{t('chat.modeLive')}</Text>
-            </Pressable>
-          </View>
           <Pressable
             style={[styles.headerIconBtn, showHistory && styles.headerIconBtnActive]}
             onPress={() => setShowHistory((s) => !s)}
@@ -541,35 +512,20 @@ export function ChatScreen() {
           >
             <View style={styles.sessionBanner}>
               <Sparkles size={14} color={colors.primary} />
-              <Text style={styles.sessionBannerText}>
-                {isLive ? t('chat.sessionLive') : t('chat.sessionDemo')}
-              </Text>
+              <Text style={styles.sessionBannerText}>{t('chat.sessionLive')}</Text>
             </View>
-            {lessonLoaded && !lessonQuery.isError && (
-              <View style={styles.loadingRow}>
-                <Loader2 size={16} color={colors.textFaint} />
-                <Text style={styles.loadingText}>{t('chat.preparingLesson')}</Text>
+            {messages.length === 0 && (
+              <View style={styles.mascotWrap}>
+                <Mascot size={88} />
               </View>
-            )}
-            {mode === 'demo' && lessonQuery.isError && (
-              <Pressable style={styles.errorBanner} onPress={() => lessonQuery.refetch()}>
-                <Text style={styles.errorBannerText}>{t('chat.lessonError')}</Text>
-              </Pressable>
             )}
             {messages.map((m) => (
               <MessageBubble key={m.id} message={m} />
             ))}
-            {isLive ? (
-              liveActive && (
-                <View style={styles.listeningRow}>
-                  <View style={styles.listeningDot} />
-                  <Text style={styles.listeningText}>{t('chat.listening')}</Text>
-                </View>
-              )
-            ) : (
+            {liveActive && (
               <View style={styles.listeningRow}>
-                <View style={[styles.listeningDot, !demoPlaying && styles.listeningDotPaused]} />
-                <Text style={styles.listeningText}>{demoPlaying ? t('chat.listening') : t('chat.paused')}</Text>
+                <View style={styles.listeningDot} />
+                <Text style={styles.listeningText}>{t('chat.listening')}</Text>
               </View>
             )}
           </ScrollView>
@@ -585,11 +541,11 @@ export function ChatScreen() {
               ]}
             />
             <Pressable
-              style={[styles.orb, (isLive ? !liveActive : !demoPlaying) ? styles.orbIdle : styles.orbActive]}
+              style={[styles.orb, !liveActive ? styles.orbIdle : styles.orbActive]}
               onPress={onOrbPress}
               accessibilityLabel={orbLabel}
             >
-              {isLive && voice.status === 'speaking' ? (
+              {voice.status === 'speaking' ? (
                 <Square size={22} color={colors.textOnPrimary} fill={colors.textOnPrimary} />
               ) : (
                 <Text style={styles.orbLabel}>{orbLabel}</Text>
@@ -601,6 +557,7 @@ export function ChatScreen() {
       )}
 
       <AppTabBar />
+      <Confetti burstKey={confettiKey} />
     </View>
   );
 }
@@ -825,31 +782,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  modeSwitch: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface,
-    borderRadius: radius.round,
-    padding: 3,
-  },
-  modeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: radius.round,
-  },
-  modeBtnActive: {
-    backgroundColor: colors.primary,
-  },
-  modeText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textMuted,
-  },
-  modeTextActive: {
-    color: colors.textOnPrimary,
-  },
   headerIconBtn: {
     width: 40,
     height: 40,
@@ -900,29 +832,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.primary,
   },
-  loadingRow: {
-    flexDirection: 'row',
+  mascotWrap: {
     alignItems: 'center',
-    alignSelf: 'center',
-    marginVertical: spacing.md,
-  },
-  loadingText: {
-    marginLeft: 6,
-    fontSize: 13,
-    color: colors.textMuted,
-  },
-  errorBanner: {
-    alignSelf: 'center',
-    marginVertical: spacing.md,
-    backgroundColor: '#FDECEC',
-    borderRadius: radius.md,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-  },
-  errorBannerText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.error,
+    marginBottom: spacing.lg,
   },
   bubbleRow: {
     marginVertical: 4,
@@ -1071,9 +983,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
     backgroundColor: colors.success,
     marginRight: 8,
-  },
-  listeningDotPaused: {
-    backgroundColor: colors.textFaint,
   },
   listeningText: {
     fontSize: 13,

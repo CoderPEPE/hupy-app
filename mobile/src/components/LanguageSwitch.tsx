@@ -1,11 +1,12 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { useI18nStore } from '../i18n';
+import { useI18nStore, useT } from '../i18n';
 import { colors, radius } from '../theme';
 
 /** Toggles between English and Brazilian Portuguese. One tap cycles the pair —
  * there are only two supported locales, so a picker would be overkill. */
 export function LanguageSwitch({ dark = false }: { dark?: boolean }) {
+  const t = useT();
   const locale = useI18nStore((s) => s.locale);
   const setLocale = useI18nStore((s) => s.setLocale);
 
@@ -15,7 +16,7 @@ export function LanguageSwitch({ dark = false }: { dark?: boolean }) {
       style={[styles.pill, dark && styles.pillDark]}
       hitSlop={8}
       accessibilityRole="button"
-      accessibilityLabel="Change language"
+      accessibilityLabel={t('language.change')}
     >
       <Text style={[styles.text, dark && styles.textDark]}>{locale === 'en' ? 'EN' : 'PT'}</Text>
     </Pressable>

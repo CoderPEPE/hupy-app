@@ -8,6 +8,7 @@ import {
   type ProgressMetric,
 } from './planets';
 import {
+  confirmFlashcardMastery,
   correctionToCard,
   createFlashcard,
   getFlashcards,
@@ -21,6 +22,7 @@ import {
   getConversation,
   getConversations,
 } from './conversations';
+import { getGamificationStats } from './gamification';
 import type { CardRating } from '../types';
 
 export const queryKeys = {
@@ -31,7 +33,12 @@ export const queryKeys = {
     ['flashcards', filters.planetId ?? 'all', filters.due ? 'due' : 'all-cards'] as const,
   conversations: ['conversations'] as const,
   conversation: (id: string) => ['conversations', id] as const,
+  gamification: ['gamification'] as const,
 };
+
+export function useGamificationStats() {
+  return useQuery({ queryKey: queryKeys.gamification, queryFn: getGamificationStats });
+}
 
 // ---------------------------------------------------------------------------
 // Queries
@@ -93,6 +100,7 @@ export function useBumpProgress() {
         qc.invalidateQueries({ queryKey: queryKeys.planet(planet.id) });
       }
       qc.invalidateQueries({ queryKey: queryKeys.planets });
+      qc.invalidateQueries({ queryKey: queryKeys.gamification });
     },
   });
 }
@@ -104,6 +112,7 @@ export function useMasterSentence() {
       masterSentence(planetId, sentenceId, mastered),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.planets });
+      qc.invalidateQueries({ queryKey: queryKeys.gamification });
     },
   });
 }
@@ -114,6 +123,7 @@ export function useReviewFlashcard() {
     mutationFn: ({ id, rating }: { id: string; rating: CardRating }) => reviewFlashcard(id, rating),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['flashcards'] });
+      qc.invalidateQueries({ queryKey: queryKeys.gamification });
     },
   });
 }
@@ -134,6 +144,17 @@ export function useCorrectionToCard() {
     mutationFn: (correctionId: string) => correctionToCard(correctionId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['flashcards'] });
+    },
+  });
+}
+
+export function useConfirmFlashcardMastery() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => confirmFlashcardMastery(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['flashcards'] });
+      qc.invalidateQueries({ queryKey: queryKeys.planets });
     },
   });
 }
@@ -174,6 +195,7 @@ export function useAddCorrection() {
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: queryKeys.conversation(variables.conversationId) });
       qc.invalidateQueries({ queryKey: queryKeys.conversations });
+      qc.invalidateQueries({ queryKey: queryKeys.gamification });
     },
   });
 }

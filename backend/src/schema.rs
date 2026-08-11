@@ -1,6 +1,20 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    badges (id) {
+        id -> Uuid,
+        #[max_length = 64]
+        code -> Varchar,
+        #[max_length = 255]
+        title -> Varchar,
+        #[max_length = 512]
+        description -> Varchar,
+        #[max_length = 32]
+        icon -> Varchar,
+    }
+}
+
+diesel::table! {
     card_reviews (id) {
         id -> Uuid,
         flashcard_id -> Uuid,
@@ -68,6 +82,7 @@ diesel::table! {
         repetitions -> Int4,
         next_review_at -> Timestamptz,
         created_at -> Timestamptz,
+        verified_live -> Bool,
     }
 }
 
@@ -165,6 +180,14 @@ diesel::table! {
 }
 
 diesel::table! {
+    user_badges (user_id, badge_id) {
+        user_id -> Uuid,
+        badge_id -> Uuid,
+        earned_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     user_planet_progress (user_id, planet_id) {
         user_id -> Uuid,
         planet_id -> Uuid,
@@ -183,6 +206,17 @@ diesel::table! {
         user_id -> Uuid,
         sentence_id -> Uuid,
         mastered -> Bool,
+    }
+}
+
+diesel::table! {
+    user_stats (user_id) {
+        user_id -> Uuid,
+        xp -> Int4,
+        streak_days -> Int4,
+        longest_streak -> Int4,
+        last_active_date -> Nullable<Date>,
+        updated_at -> Timestamptz,
     }
 }
 
@@ -209,12 +243,16 @@ diesel::joinable!(lesson_steps -> planets (planet_id));
 diesel::joinable!(messages -> conversations (conversation_id));
 diesel::joinable!(planet_lessons -> planets (planet_id));
 diesel::joinable!(planet_sentences -> planets (planet_id));
+diesel::joinable!(user_badges -> badges (badge_id));
+diesel::joinable!(user_badges -> users (user_id));
 diesel::joinable!(user_planet_progress -> planets (planet_id));
 diesel::joinable!(user_planet_progress -> users (user_id));
 diesel::joinable!(user_sentence_progress -> planet_sentences (sentence_id));
 diesel::joinable!(user_sentence_progress -> users (user_id));
+diesel::joinable!(user_stats -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    badges,
     card_reviews,
     conversations,
     corrections,
@@ -225,7 +263,9 @@ diesel::allow_tables_to_appear_in_same_query!(
     planet_sentences,
     planets,
     tts_audio,
+    user_badges,
     user_planet_progress,
     user_sentence_progress,
+    user_stats,
     users,
 );

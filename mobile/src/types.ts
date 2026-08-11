@@ -117,6 +117,8 @@ export type Flashcard = {
   /** true when the card is due for review right now */
   due: boolean;
   last_rating: CardRating | null;
+  /** false when rated "easy" but the tutor hasn't re-tested it live yet */
+  verified_live: boolean;
 };
 
 // ---------------------------------------------------------------------------

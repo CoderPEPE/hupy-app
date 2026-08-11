@@ -349,6 +349,8 @@ async fn add_correction(
     })
     .await?;
 
+    crate::gamification::touch_activity_and_award_xp(&state.pool, user_id, 3).await;
+
     Ok((axum::http::StatusCode::CREATED, Json(corr)))
 }
 

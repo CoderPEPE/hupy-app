@@ -7,6 +7,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { ApiError } from '../api/client';
 import { getRealtimeClientSecret } from '../api/realtime';
+import type { RealtimeTool } from '../api/realtime';
+import { translate, useI18nStore } from '../i18n';
 import { useAuthStore } from '../store/auth';
 import { float32ToPcm16Base64, resample } from './audioCodec';
 import { realtimeAudioPlayer } from './audioEngine';
@@ -20,6 +22,10 @@ export type ChatMessage = {
   partial?: boolean;
 };
 
+/** Invoked when the tutor calls a tool mid-conversation; must resolve with a
+ * small JSON-serializable result the model can read back. */
+export type ToolCallHandler = (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
 const REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1';
 const RECORD_RATE = 48000; // supported by @siteed/audio-studio
 const TARGET_RATE = 24000; // required by the Realtime API
@@ -27,11 +33,20 @@ const VOICE = 'coral'; // ChatGPT's default Advanced Voice — warm and conversa
 
 /**
  * Safety margin added to the actual remaining playback time after the tutor
- * finishes a sentence: the speaker needs a moment to go silent and the mic
- * needs a moment to stop ringing. Prevents the tail of her voice being
- * misheard as the user.
+ * finishes a sentence (Android only — see the barge-in note on
+ * `handleAudioStream` for why iOS doesn't need this): the speaker needs a
+ * moment to go silent and the mic needs a moment to stop ringing.
  */
 const POST_SPEECH_MUTE_MS = 400;
+
+/**
+ * iOS only: a brief mute right as a new tutor turn starts, so the mic doesn't
+ * catch the exact instant playback begins. After this, the mic stays live
+ * through the whole tutor turn so the user can interrupt by talking, relying
+ * on the VoiceChat audio session's hardware echo cancellation (see
+ * `RECORDING_CONFIG.ios.audioSession`) instead of a full mute.
+ */
+const RESPONSE_START_GRACE_MS = 150;
 
 // Only used if the backend is too old to return the canonical instructions.
 const FALLBACK_TUTOR_PROMPT =
@@ -67,7 +82,14 @@ const RECORDING_CONFIG: RecordingConfig = {
   },
 };
 
-export function useVoiceConversation() {
+/** Imperative i18n lookup: callbacks below are frozen in `useCallback([])`, so a
+ * hook-bound `t` would go stale after a language switch — this always reads
+ * the current locale instead. */
+function t(key: Parameters<typeof translate>[1], params?: Parameters<typeof translate>[2]) {
+  return translate(useI18nStore.getState().locale, key, params);
+}
+
+export function useVoiceConversation(onToolCall: ToolCallHandler) {
   const recorder = useAudioRecorder();
   const [status, setStatus] = useState<ConversationStatus>('idle');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -77,6 +99,15 @@ export function useVoiceConversation() {
   const statusRef = useRef<ConversationStatus>('idle');
   // Earliest time (ms epoch) at which mic audio may be sent to the API again.
   const micUnmuteAtRef = useRef(0);
+  // Always-current tool-call handler, so the frozen WS callbacks never call a
+  // stale closure (same pattern as the imperative `t()` lookup above).
+  const onToolCallRef = useRef(onToolCall);
+  useEffect(() => {
+    onToolCallRef.current = onToolCall;
+  }, [onToolCall]);
+  // call_id -> tool name, filled in when a function_call item starts and
+  // consumed once its arguments finish streaming.
+  const pendingToolCallsRef = useRef<Map<string, string>>(new Map());
 
   const setConversationStatus = (next: ConversationStatus) => {
     statusRef.current = next;
@@ -112,10 +143,10 @@ async function ensureMicPermission(): Promise<boolean> {
   const granted = await PermissionsAndroid.request(
     PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
     {
-      title: 'Microphone access',
-      message: 'Huppy needs the microphone so you can practice speaking English.',
-      buttonPositive: 'Allow',
-      buttonNegative: 'Deny',
+      title: t('voice.micPermissionTitle'),
+      message: t('voice.micPermissionMessage'),
+      buttonPositive: t('voice.micPermissionAllow'),
+      buttonNegative: t('voice.micPermissionDeny'),
     },
   );
 
@@ -125,12 +156,16 @@ async function ensureMicPermission(): Promise<boolean> {
 /**
  * Streams microphone PCM to the Realtime API.
  *
- * Strict turn-taking: while the tutor is speaking (or in the short mute
- * window after she finishes) we DON'T forward mic audio at all. Without
- * hardware echo cancellation, the tutor's voice comes out of the speaker and
- * straight into the mic — the API would hear it as the user, cancel its own
- * response, transcribe its own words as the user's, and loop forever.
- * Barge-in is handled by tapping the mic (sends response.cancel).
+ * Turn-taking differs by platform:
+ * - iOS: `RECORDING_CONFIG.ios.audioSession.mode = 'VoiceChat'` enables
+ *   hardware echo cancellation, so mic audio keeps flowing even while the
+ *   tutor is talking (minus a brief grace window right as a turn starts).
+ *   That's what makes voice barge-in possible — the server's VAD can hear
+ *   the user start talking over the tutor and fires
+ *   `input_audio_buffer.speech_started`, which cuts the tutor off.
+ * - Android has no guaranteed hardware AEC across devices, so it keeps the
+ *   original strict behavior: mic is fully muted for the whole tutor turn,
+ *   and barge-in only works by tapping the mic (`interrupt()`).
  */
   // Diagnostic counters for the echo-loop: every 2s we log how many mic
   // frames were sent vs dropped while the tutor was speaking.
@@ -141,7 +176,9 @@ async function ensureMicPermission(): Promise<boolean> {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
     const dropped =
-      statusRef.current === 'speaking' || Date.now() < micUnmuteAtRef.current;
+      Platform.OS === 'ios'
+        ? Date.now() < micUnmuteAtRef.current
+        : statusRef.current === 'speaking' || Date.now() < micUnmuteAtRef.current;
     const stats = micStatsRef.current;
     if (dropped) {
       stats.dropped += 1;
@@ -178,12 +215,47 @@ async function ensureMicPermission(): Promise<boolean> {
     );
   };
 
+  /**
+   * Executes a tool call the model just made, then reports the result back
+   * so the model can continue the turn. `onToolCall` (owned by the caller,
+   * e.g. ChatScreen) does the actual REST work — this hook only speaks the
+   * Realtime wire protocol.
+   */
+  const handleToolCall = async (name: string, callId: string, argsJson: string) => {
+    let args: Record<string, unknown> = {};
+    try {
+      args = argsJson ? JSON.parse(argsJson) : {};
+    } catch (e) {
+      if (__DEV__) console.warn('[voice] malformed tool arguments', name, argsJson, e);
+    }
+
+    let output: Record<string, unknown>;
+    try {
+      output = (await onToolCallRef.current(name, args)) ?? {};
+    } catch (e) {
+      output = { error: e instanceof Error ? e.message : 'tool call failed' };
+    }
+
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(
+      JSON.stringify({
+        type: 'conversation.item.create',
+        item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(output) },
+      }),
+    );
+    ws.send(JSON.stringify({ type: 'response.create' }));
+  };
+
   const handleServerEvent = (msg: {
     type: string;
     delta?: string;
     transcript?: string;
     item_id?: string;
     response_id?: string;
+    call_id?: string;
+    arguments?: string;
+    item?: { type?: string; call_id?: string; name?: string };
     error?: { message?: string };
   }) => {
     // Trace the session lifecycle so the echo loop is diagnosable.
@@ -200,13 +272,15 @@ async function ensureMicPermission(): Promise<boolean> {
           .startRecording({ ...RECORDING_CONFIG, onAudioStream: handleAudioStream })
           .catch((e) => {
             if (__DEV__) console.warn('[voice] failed to start recording', e);
-            setError('Microphone failed to start. Check permissions.');
+            setError(t('voice.micFailedToStart'));
             setConversationStatus('error');
           });
         break;
 
       case 'input_audio_buffer.speech_started':
-        // The user began talking — cut the tutor off immediately (barge-in).
+        // The user began talking — cut the tutor off immediately (barge-in:
+        // automatic on iOS once real mic audio reaches the server mid-turn,
+        // or from a manual tap-to-interrupt on either platform).
         realtimeAudioPlayer.clear();
         setConversationStatus('listening');
         break;
@@ -237,9 +311,11 @@ async function ensureMicPermission(): Promise<boolean> {
 
       case 'response.output_audio.delta':
         if (statusRef.current !== 'speaking') {
-          // Mute the mic for the whole tutor turn (echo prevention).
           debugLog('[voice] tutor speaking starts');
           setConversationStatus('speaking');
+          if (Platform.OS === 'ios') {
+            micUnmuteAtRef.current = Date.now() + RESPONSE_START_GRACE_MS;
+          }
         }
         if (msg.delta) {
           realtimeAudioPlayer.playPcm16Base64(msg.delta);
@@ -247,23 +323,42 @@ async function ensureMicPermission(): Promise<boolean> {
         break;
 
       case 'response.output_audio.done':
-        // Tutor finished streaming. Keep the mic muted until the queued
-        // playback has actually finished (the API's "done" arrives before the
-        // audio finishes playing), plus a small safety margin, so her voice
-        // can never be caught by the mic and echoed back.
-        micUnmuteAtRef.current =
-          Date.now() + realtimeAudioPlayer.getRemainingPlaybackMs() + POST_SPEECH_MUTE_MS;
-        debugLog(
-          '[voice] tutor done — mute until',
-          micUnmuteAtRef.current,
-          '(remaining ms:',
-          realtimeAudioPlayer.getRemainingPlaybackMs(),
-          ')',
-        );
+        // Android only: keep the mic muted until the queued playback has
+        // actually finished (the API's "done" arrives before the audio
+        // finishes playing), plus a small safety margin. iOS relies on
+        // hardware echo cancellation instead and stays live throughout.
+        if (Platform.OS !== 'ios') {
+          micUnmuteAtRef.current =
+            Date.now() + realtimeAudioPlayer.getRemainingPlaybackMs() + POST_SPEECH_MUTE_MS;
+          debugLog(
+            '[voice] tutor done — mute until',
+            micUnmuteAtRef.current,
+            '(remaining ms:',
+            realtimeAudioPlayer.getRemainingPlaybackMs(),
+            ')',
+          );
+        }
         setConversationStatus('listening');
         break;
 
       case 'response.done':
+        break;
+
+      // --- Tool calling ---------------------------------------------------
+      case 'response.output_item.added':
+        if (msg.item?.type === 'function_call' && msg.item.call_id && msg.item.name) {
+          pendingToolCallsRef.current.set(msg.item.call_id, msg.item.name);
+        }
+        break;
+
+      case 'response.function_call_arguments.done':
+        if (msg.call_id) {
+          const name = pendingToolCallsRef.current.get(msg.call_id);
+          pendingToolCallsRef.current.delete(msg.call_id);
+          if (name) {
+            handleToolCall(name, msg.call_id, msg.arguments ?? '{}');
+          }
+        }
         break;
 
       case 'error':
@@ -278,8 +373,8 @@ async function ensureMicPermission(): Promise<boolean> {
 
   /**
    * User tapped while the tutor is speaking: stop her, drop the audio queue,
-   * and let the mic listen again. This is the barge-in path without hardware
-   * echo cancellation (voice-triggered barge-in would hear her own echo).
+   * and let the mic listen again. Works on both platforms regardless of
+   * whether automatic voice barge-in is active.
    */
   const interrupt = useCallback(async () => {
     const ws = wsRef.current;
@@ -318,16 +413,14 @@ async function ensureMicPermission(): Promise<boolean> {
     await stopInternal();
     setError(null);
     setMessages([]);
+    pendingToolCallsRef.current.clear();
 
     // Ask for the microphone first — on Android this triggers the system popup.
     // (Must happen before any @siteed/audio-studio call: its internal request
     // runs from a background context on Android and is silently denied.)
     const micGranted = await ensureMicPermission();
     if (!micGranted) {
-      setError(
-        'Microphone permission is required to practice speaking. ' +
-          'Enable it in Settings and try again.',
-      );
+      setError(t('voice.micPermissionRequired'));
       setConversationStatus('error');
       return;
     }
@@ -342,17 +435,19 @@ async function ensureMicPermission(): Promise<boolean> {
 
     let secret: string;
     let instructions: string;
+    let tools: RealtimeTool[];
     try {
       const res = await getRealtimeClientSecret();
       secret = res.value;
       instructions = res.instructions ?? FALLBACK_TUTOR_PROMPT;
+      tools = res.tools ?? [];
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         // The JWT expired or was revoked — bounce to the login screen.
         useAuthStore.getState().signOut();
         return;
       }
-      setError(e instanceof Error ? e.message : 'Could not start a session');
+      setError(e instanceof Error ? e.message : t('voice.couldNotStartSession'));
       setConversationStatus('error');
       return;
     }
@@ -372,11 +467,12 @@ async function ensureMicPermission(): Promise<boolean> {
             model: 'gpt-realtime-2.1',
             instructions,
             output_modalities: ['audio'],
+            tools,
             audio: {
               input: {
                 format: { type: 'audio/pcm', rate: TARGET_RATE },
                 transcription: { model: 'gpt-live-transcribe' },
-                turn_detection: { type: 'semantic_vad', eagerness: 'low' },
+                turn_detection: { type: 'semantic_vad', eagerness: 'medium' },
               },
               output: {
                 format: { type: 'audio/pcm', rate: TARGET_RATE },
@@ -399,13 +495,13 @@ async function ensureMicPermission(): Promise<boolean> {
     };
 
     ws.onerror = () => {
-      setError('Connection lost. Check your network and try again.');
+      setError(t('voice.connectionLost'));
       setConversationStatus('error');
     };
 
     ws.onclose = () => {
       if (statusRef.current !== 'idle') {
-        setError('The session ended unexpectedly.');
+        setError(t('voice.sessionEnded'));
         setConversationStatus('error');
       }
     };

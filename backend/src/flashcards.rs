@@ -17,6 +17,7 @@ pub fn router() -> Router<AppState> {
         .route("/", get(list_flashcards).post(create_flashcard))
         .route("/{id}", axum::routing::delete(delete_flashcard))
         .route("/{id}/review", axum::routing::post(review_flashcard))
+        .route("/{id}/confirm-live-mastery", axum::routing::post(confirm_live_mastery))
         .route("/corrections/{correction_id}/flashcard", axum::routing::post(correction_to_card))
 }
 
@@ -78,6 +79,7 @@ struct Card {
     repetitions: i32,
     next_review_at: DateTime<Utc>,
     created_at: DateTime<Utc>,
+    verified_live: bool,
 }
 
 #[derive(Serialize)]
@@ -101,6 +103,9 @@ pub struct CardJson {
     pub due: bool,
     /// most recent rating, if any
     pub last_rating: Option<String>,
+    /// false when the card was rated "easy" but the tutor hasn't re-tested it
+    /// live yet — a self-report alone never counts as mastered.
+    pub verified_live: bool,
 }
 
 impl CardJson {
@@ -123,6 +128,7 @@ impl CardJson {
             created_at: c.created_at,
             due: c.next_review_at <= Utc::now(),
             last_rating,
+            verified_live: c.verified_live,
         }
     }
 }
@@ -255,7 +261,12 @@ async fn review_flashcard(
         return Err(AppError::bad_request("rating must be 'hard', 'medium' or 'easy'"));
     }
 
-    let card = run_db(&state.pool, move |conn| {
+    // "easy" is a self-report — don't trust it until the tutor re-tests the
+    // content live (spec: the AI must confirm mastery, not just take the
+    // learner's word for it).
+    let just_claimed_easy = body.rating == "easy";
+
+    let (card, planet_id) = run_db(&state.pool, move |conn| {
         let card: Card = flashcards::table
             .find(id)
             .first(conn)
@@ -282,15 +293,106 @@ async fn review_flashcard(
                 flashcards::ease.eq(ease),
                 flashcards::repetitions.eq(repetitions),
                 flashcards::next_review_at.eq(next),
+                flashcards::verified_live.eq(!just_claimed_easy && card.verified_live),
             ))
             .execute(conn)?;
 
         let updated = flashcards::table.find(card.id).first::<Card>(conn)?;
-        Ok(CardJson::from_card(&updated, Some(body.rating)))
+        Ok((CardJson::from_card(&updated, Some(body.rating)), updated.planet_id))
     })
     .await?;
 
+    if let Some(planet_id) = planet_id {
+        let metric = recompute_flashcards_metric(&state.pool, user_id, planet_id).await?;
+        crate::planets::set_metric_absolute(&state.pool, user_id, planet_id, "flashcards", metric).await?;
+    }
+
+    crate::gamification::touch_activity_and_award_xp(&state.pool, user_id, 2).await;
+
     Ok(Json(card))
+}
+
+/// Re-confirms a flashcard the tutor has successfully quizzed live after it
+/// was rated "easy" — clears the pending-reverification flag.
+async fn confirm_live_mastery(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(id): Path<Uuid>,
+) -> Result<Json<CardJson>, AppError> {
+    let (card, planet_id) = run_db(&state.pool, move |conn| {
+        let card: Card = flashcards::table
+            .find(id)
+            .first(conn)
+            .optional()?
+            .ok_or_else(|| AppError::NotFound("flashcard not found".into()))?;
+        if card.user_id != user_id {
+            return Err(AppError::NotFound("flashcard not found".into()));
+        }
+
+        diesel::update(flashcards::table.find(id))
+            .set(flashcards::verified_live.eq(true))
+            .execute(conn)?;
+
+        let updated = flashcards::table.find(id).first::<Card>(conn)?;
+        let ratings = latest_ratings(conn, &[id])?;
+        Ok((CardJson::from_card(&updated, ratings.get(&id).cloned()), updated.planet_id))
+    })
+    .await?;
+
+    if let Some(planet_id) = planet_id {
+        let metric = recompute_flashcards_metric(&state.pool, user_id, planet_id).await?;
+        crate::planets::set_metric_absolute(&state.pool, user_id, planet_id, "flashcards", metric).await?;
+    }
+
+    Ok(Json(card))
+}
+
+/// Flashcards worth quizzing in the live session right now: due for review,
+/// or claiming "easy" without having been re-tested live yet.
+pub(crate) async fn review_targets_for(
+    pool: &crate::db::DbPool,
+    user_id: Uuid,
+    limit: i64,
+) -> Result<Vec<(Uuid, String, String)>, AppError> {
+    run_db(pool, move |conn| {
+        Ok(flashcards::table
+            .filter(flashcards::user_id.eq(user_id))
+            .filter(flashcards::next_review_at.le(Utc::now()).or(flashcards::verified_live.eq(false)))
+            .order(flashcards::next_review_at.asc())
+            .select((flashcards::id, flashcards::en, flashcards::pt))
+            .limit(limit)
+            .load(conn)?)
+    })
+    .await
+}
+
+/// Fraction of the user's flashcards for a planet that are both re-confirmed
+/// live and reasonably well-scheduled (interval >= 7 days) — a real,
+/// countable stand-in for "the flashcards for this planet are known".
+async fn recompute_flashcards_metric(
+    pool: &crate::db::DbPool,
+    user_id: Uuid,
+    planet_id: Uuid,
+) -> Result<f64, AppError> {
+    run_db(pool, move |conn| {
+        let total: i64 = flashcards::table
+            .filter(flashcards::user_id.eq(user_id))
+            .filter(flashcards::planet_id.eq(planet_id))
+            .count()
+            .get_result(conn)?;
+        if total == 0 {
+            return Ok(0.0);
+        }
+        let graduated: i64 = flashcards::table
+            .filter(flashcards::user_id.eq(user_id))
+            .filter(flashcards::planet_id.eq(planet_id))
+            .filter(flashcards::verified_live.eq(true))
+            .filter(flashcards::interval_days.ge(7))
+            .count()
+            .get_result(conn)?;
+        Ok(graduated as f64 / total as f64)
+    })
+    .await
 }
 
 async fn delete_flashcard(

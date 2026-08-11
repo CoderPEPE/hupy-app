@@ -1,4 +1,4 @@
-import { BookOpen, CheckCircle2, ChevronLeft, Layers, RotateCcw, Volume2, Loader2 } from 'lucide-react-native';
+import { BookOpen, CheckCircle2, ChevronLeft, Layers, RefreshCw, RotateCcw, Volume2, Loader2 } from 'lucide-react-native';
 
 function CheckCircle2Icon() {
   return <CheckCircle2 size={32} color={colors.success} />;
@@ -8,6 +8,7 @@ import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppTabBar } from '../components/AppTabBar';
 import { ProgressBar } from '../components/ProgressBar';
+import { StreakXpBar } from '../components/StreakXpBar';
 import { useFlashcards, usePlanets, useReviewFlashcard } from '../api/hooks';
 import { plural, useT, type TranslationKey } from '../i18n';
 import { useUiStore } from '../store/ui';
@@ -106,9 +107,10 @@ export function FlashcardsScreen() {
             <BookOpen size={22} color={colors.primary} />
           </View>
           <View style={{ flex: 1, marginLeft: spacing.sm }}>
-            <Text style={styles.headerTitle}>Flashcards</Text>
-            <Text style={styles.headerSub}>Spaced repetition keeps it fresh</Text>
+            <Text style={styles.headerTitle}>{t('flashcards.header')}</Text>
+            <Text style={styles.headerSub}>{t('flashcards.headerSub')}</Text>
           </View>
+          <StreakXpBar />
         </View>
 
         <ScrollView contentContainerStyle={styles.deckList} showsVerticalScrollIndicator={false}>
@@ -117,8 +119,11 @@ export function FlashcardsScreen() {
               <Layers size={22} color={colors.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.deckName}>All cards</Text>
-              <Text style={styles.deckMeta}>{cards.length} cards · {cards.filter((c) => c.due).length} due now</Text>
+              <Text style={styles.deckName}>{t('flashcards.allCards')}</Text>
+              <Text style={styles.deckMeta}>
+                {t(plural(cards.length, 'flashcards.cardOne', 'flashcards.cardOther'), { count: cards.length })} ·{' '}
+                {t('flashcards.dueNow', { count: cards.filter((c) => c.due).length })}
+              </Text>
               <View style={styles.deckProgress}>
                 <ProgressBar
                   value={cards.length ? cards.filter((c) => c.due).length / cards.length : 0}
@@ -138,8 +143,15 @@ export function FlashcardsScreen() {
                   <BookOpen size={22} color={planet.color} />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.deckName}>Planet {planet.number} · {planet.title}</Text>
-                  <Text style={styles.deckMeta}>{planetCards.length} cards · {planetDue} due now</Text>
+                  <Text style={styles.deckName}>
+                    {t('flashcards.planetDeck', { number: planet.number, title: planet.title })}
+                  </Text>
+                  <Text style={styles.deckMeta}>
+                    {t(plural(planetCards.length, 'flashcards.cardOne', 'flashcards.cardOther'), {
+                      count: planetCards.length,
+                    })}{' '}
+                    · {t('flashcards.dueNow', { count: planetDue })}
+                  </Text>
                   <View style={styles.deckProgress}>
                     <ProgressBar
                       value={planetCards.length ? planetDue / planetCards.length : 0}
@@ -152,9 +164,7 @@ export function FlashcardsScreen() {
             );
           })}
 
-          <Text style={styles.deckTip}>
-            Cards marked Hard come back sooner. Easy cards are tested again later to confirm you really know them.
-          </Text>
+          <Text style={styles.deckTip}>{t('flashcards.tip')}</Text>
         </ScrollView>
 
         <AppTabBar />
@@ -170,12 +180,12 @@ export function FlashcardsScreen() {
             <ChevronLeft size={22} color={colors.text} />
           </Pressable>
           <View style={{ flex: 1, marginLeft: spacing.sm }}>
-            <Text style={styles.headerTitle}>{deck === 'all' ? 'All cards' : planetName(deck)}</Text>
+            <Text style={styles.headerTitle}>{deck === 'all' ? t('flashcards.allCards') : planetName(deck)}</Text>
           </View>
         </View>
         <View style={styles.centerState}>
           <Loader2 size={28} color={colors.textFaint} />
-          <Text style={styles.centerText}>Loading your cards…</Text>
+          <Text style={styles.centerText}>{t('flashcards.loadingCards')}</Text>
         </View>
         <AppTabBar />
       </View>
@@ -190,15 +200,13 @@ export function FlashcardsScreen() {
             <ChevronLeft size={22} color={colors.text} />
           </Pressable>
           <View style={{ flex: 1, marginLeft: spacing.sm }}>
-            <Text style={styles.headerTitle}>{deck === 'all' ? 'All cards' : planetName(deck)}</Text>
+            <Text style={styles.headerTitle}>{deck === 'all' ? t('flashcards.allCards') : planetName(deck)}</Text>
           </View>
         </View>
         <View style={styles.centerState}>
           <BookOpen size={32} color={colors.primary} />
-          <Text style={styles.centerTitle}>No cards here yet</Text>
-          <Text style={styles.centerText}>
-            Cards are created automatically from your corrections and lessons. Practice in Chat and they will appear here.
-          </Text>
+          <Text style={styles.centerTitle}>{t('flashcards.emptyTitle')}</Text>
+          <Text style={styles.centerText}>{t('flashcards.emptyBody')}</Text>
         </View>
         <AppTabBar />
       </View>
@@ -214,15 +222,13 @@ export function FlashcardsScreen() {
             <ChevronLeft size={22} color={colors.text} />
           </Pressable>
           <View style={{ flex: 1, marginLeft: spacing.sm }}>
-            <Text style={styles.headerTitle}>{deck === 'all' ? 'All cards' : planetName(deck)}</Text>
+            <Text style={styles.headerTitle}>{deck === 'all' ? t('flashcards.allCards') : planetName(deck)}</Text>
           </View>
         </View>
         <View style={styles.centerState}>
           <CheckCircle2Icon />
-          <Text style={styles.centerTitle}>All caught up!</Text>
-          <Text style={styles.centerText}>
-            Nothing is due right now. Keep chatting — new corrections become cards, and difficult cards come back sooner.
-          </Text>
+          <Text style={styles.centerTitle}>{t('flashcards.caughtUpTitle')}</Text>
+          <Text style={styles.centerText}>{t('flashcards.caughtUpBody')}</Text>
         </View>
         <AppTabBar />
       </View>
@@ -236,25 +242,32 @@ export function FlashcardsScreen() {
           <ChevronLeft size={22} color={colors.text} />
         </Pressable>
         <View style={{ flex: 1, marginLeft: spacing.sm }}>
-          <Text style={styles.headerTitle}>{deck === 'all' ? 'All cards' : planetName(deck)}</Text>
+          <Text style={styles.headerTitle}>{deck === 'all' ? t('flashcards.allCards') : planetName(deck)}</Text>
           <Text style={styles.headerSub}>
-            Card {index + 1} of {deckCards.length} · {dueCount} due now
+            {t('flashcards.cardOfTotal', { index: index + 1, total: deckCards.length, due: dueCount })}
           </Text>
         </View>
-        <Pressable onPress={next} hitSlop={8} style={styles.backBtn} accessibilityLabel="Next card">
+        <Pressable onPress={next} hitSlop={8} style={styles.backBtn} accessibilityLabel={t('flashcards.nextCard')}>
           <RotateCcw size={18} color={colors.textMuted} />
         </Pressable>
       </View>
 
+      {card.last_rating === 'easy' && !card.verified_live && (
+        <View style={styles.pendingBadge}>
+          <RefreshCw size={12} color={colors.warning} />
+          <Text style={styles.pendingBadgeText}>{t('flashcards.pendingRecheck')}</Text>
+        </View>
+      )}
+
       <View style={styles.cardArea}>
-        <Pressable onPress={() => setFlipped((f) => !f)} style={styles.cardPressable} accessibilityLabel="Flip card">
+        <Pressable onPress={() => setFlipped((f) => !f)} style={styles.cardPressable} accessibilityLabel={t('flashcards.tapToFlip')}>
           <Animated.View style={[styles.card, styles.cardFront, { transform: [{ perspective: 1000 }, { rotateY: frontRotate }] }]}>
-            <Text style={styles.cardLabel}>FRONT</Text>
+            <Text style={styles.cardLabel}>{t('flashcards.front')}</Text>
             <Text style={styles.cardEnglish}>{card.en}</Text>
             <Pressable style={[styles.listenBtn, listening && { backgroundColor: colors.primary }]} onPress={listen}>
               <Volume2 size={16} color={listening ? colors.textOnPrimary : colors.primary} />
               <Text style={[styles.listenText, listening && { color: colors.textOnPrimary }]}>
-                {listening ? 'Playing…' : 'Listen'}
+                {listening ? t('flashcards.playing') : t('flashcards.listen')}
               </Text>
             </Pressable>
             {card.subject || card.verb || card.complement ? (
@@ -279,24 +292,46 @@ export function FlashcardsScreen() {
                 ) : null}
               </View>
             ) : null}
-            <Text style={styles.flipHint}>Tap to flip</Text>
+            <Text style={styles.flipHint}>{t('flashcards.tapToFlip')}</Text>
           </Animated.View>
 
           <Animated.View style={[styles.card, styles.cardBack, { transform: [{ perspective: 1000 }, { rotateY: backRotate }] }]}>
-            <Text style={styles.cardLabel}>BACK</Text>
+            <Text style={styles.cardLabel}>{t('flashcards.back')}</Text>
             <Text style={styles.cardEnglish}>{card.en}</Text>
             <Text style={styles.cardPt}>{card.pt}</Text>
             <Text style={styles.cardExplanation}>{card.explanation}</Text>
-            <Text style={styles.flipHint}>Tap to flip back</Text>
+            {card.subject || card.verb || card.complement ? (
+              <View style={styles.structureBoxOnDark}>
+                {card.subject ? (
+                  <View style={styles.structureRow}>
+                    <Text style={[styles.structureTag, styles.structureTagOnDark]}>S</Text>
+                    <Text style={styles.structureValueOnDark}>{card.subject}</Text>
+                  </View>
+                ) : null}
+                {card.verb ? (
+                  <View style={styles.structureRow}>
+                    <Text style={[styles.structureTag, styles.structureTagOnDark]}>V</Text>
+                    <Text style={styles.structureValueOnDark}>{card.verb}</Text>
+                  </View>
+                ) : null}
+                {card.complement ? (
+                  <View style={styles.structureRow}>
+                    <Text style={[styles.structureTag, styles.structureTagOnDark]}>C</Text>
+                    <Text style={styles.structureValueOnDark}>{card.complement}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+            <Text style={styles.flipHint}>{t('flashcards.tapToFlipBack')}</Text>
           </Animated.View>
         </Pressable>
       </View>
 
       <View style={[styles.ratingArea, { paddingBottom: spacing.sm }]}>
-        <Text style={styles.ratingTitle}>How well did you know it?</Text>
+        <Text style={styles.ratingTitle}>{t('flashcards.ratingQuestion')}</Text>
         <RatingButtons card={card} />
         <Pressable onPress={next} style={styles.nextBtn}>
-          <Text style={styles.nextText}>Next card</Text>
+          <Text style={styles.nextText}>{t('flashcards.nextCard')}</Text>
         </Pressable>
       </View>
 
@@ -507,6 +542,37 @@ const styles = StyleSheet.create({
   structureValue: {
     fontSize: 14,
     color: colors.text,
+  },
+  structureBoxOnDark: {
+    marginTop: spacing.md,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderRadius: radius.md,
+    padding: spacing.sm,
+  },
+  structureTagOnDark: {
+    backgroundColor: colors.textOnPrimary,
+    color: colors.primary,
+  },
+  structureValueOnDark: {
+    fontSize: 14,
+    color: colors.textOnPrimary,
+  },
+  pendingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 5,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.warning + '22',
+    borderRadius: radius.round,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  pendingBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#8A6D00',
   },
   flipHint: {
     position: 'absolute',

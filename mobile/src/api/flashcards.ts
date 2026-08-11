@@ -55,3 +55,11 @@ export function correctionToCard(correctionId: string) {
     auth: true,
   });
 }
+
+/** Confirms the tutor re-tested an "easy"-rated card live and it held up. */
+export function confirmFlashcardMastery(id: string) {
+  return apiRequest<Flashcard>(`/api/flashcards/${id}/confirm-live-mastery`, {
+    method: 'POST',
+    auth: true,
+  });
+}

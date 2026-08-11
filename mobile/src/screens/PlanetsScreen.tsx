@@ -43,6 +43,9 @@ import Svg, {
 import { useFlashcards, usePlanet, usePlanets } from '../api/hooks';
 import { AppTabBar } from '../components/AppTabBar';
 import { GradientBar } from '../components/GradientBar';
+import { LanguageSwitch } from '../components/LanguageSwitch';
+import { StreakXpBar } from '../components/StreakXpBar';
+import { plural, useT, type TranslationKey } from '../i18n';
 import {
   levelVisualStyle,
   planetImageSource,
@@ -68,7 +71,13 @@ const SPACE_TEXT_FAINT = 'rgba(255,255,255,0.30)';
 const GOLD = '#C9A227';
 const GOLD_DEEP = '#8B6A1F';
 
-const AUDIO_MODES = ['English only', 'English + pause', 'PT → EN', 'Random order', 'Hard review'];
+const AUDIO_MODE_KEYS: TranslationKey[] = [
+  'planets.audioModeEnglishOnly',
+  'planets.audioModeEnglishPause',
+  'planets.audioModePtEn',
+  'planets.audioModeRandom',
+  'planets.audioModeHardReview',
+];
 
 // ---------------------------------------------------------------------------
 // Tiny deterministic helpers (stars, craters, debris — stable across renders)
@@ -277,30 +286,31 @@ function ProgressCard({
   planet: Planet;
   cardCount: number;
 }) {
+  const t = useT();
   const locked = planet.status === 'locked';
   const mastery = detail?.progress.mastery ?? planet.progress.mastery ?? 0;
   const stats = [
     {
       icon: <MessageCircle size={18} color="#F472B6" />,
       value: `${detail?.mastered_sentences ?? planet.mastered_sentences}/${detail?.total_sentences ?? planet.total_sentences}`,
-      label: 'Sentences',
+      label: t('planets.statSentences'),
     },
     {
       icon: <AudioWaveform size={18} color="#22D3EE" />,
       // listening is a real 0..1 ratio; shown as cumulative minutes (~40 min at
       // full progress) to match the reference card layout.
       value: `${Math.round((detail?.progress.listening ?? planet.progress.listening) * 40)}m`,
-      label: 'Listening',
+      label: t('planets.statListening'),
     },
     {
       icon: <BookOpen size={18} color="#FBBF24" />,
       value: `${cardCount}`,
-      label: 'Flashcards',
+      label: t('planets.statFlashcards'),
     },
     {
       icon: <Star size={18} color="#A78BFA" />,
       value: `${Math.round(mastery * 100)}%`,
-      label: 'Mastery',
+      label: t('planets.statMastery'),
     },
   ];
 
@@ -309,7 +319,7 @@ function ProgressCard({
       <View style={styles.progressTop}>
         <View style={styles.progressTopLeft}>
           <Trophy size={16} color={SPACE_ACCENT} />
-          <Text style={styles.progressTitle}>{locked ? 'Unlock progress' : 'Your progress'}</Text>
+          <Text style={styles.progressTitle}>{locked ? t('planets.unlockProgress') : t('planets.yourProgress')}</Text>
         </View>
         <Text style={styles.progressPct}>
           {locked ? `${Math.round(planet.unlock_progress * 100)}%` : `${Math.round(mastery * 100)}%`}
@@ -346,6 +356,7 @@ function LessonRow({
   isLast: boolean;
   onPress: () => void;
 }) {
+  const t = useT();
   const state = lesson.completed ? 'completed' : lesson.locked ? 'locked' : 'current';
 
   return (
@@ -414,7 +425,7 @@ function LessonRow({
               state === 'locked' && { color: SPACE_TEXT_FAINT },
             ]}
           >
-            {state === 'completed' ? 'Completed' : state === 'current' ? 'Continue' : 'Locked'}
+            {state === 'completed' ? t('planets.completed') : state === 'current' ? t('planets.continue') : t('planets.locked')}
           </Text>
           {state !== 'locked' && (
             <ChevronRight size={14} color={state === 'completed' ? '#1E7A43' : '#FFFFFF'} />
@@ -429,17 +440,25 @@ function LessonRow({
 // Continuous audio panel (for the car / commute)
 // ---------------------------------------------------------------------------
 
+/** Silence between the two listens of a sentence in "English + pause" mode —
+ * long enough to actually say it back before the tutor moves on. */
+const REPEAT_PAUSE_MS = 2500;
+
 function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; planet: Planet }) {
+  const t = useT();
   const [mode, setMode] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [nowText, setNowText] = useState('Tap play to listen');
+  const [nowText, setNowText] = useState(t('planets.tapToListen'));
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Breaks the mode-1 sequencer loop out of its awaits when stopped/unmounted.
+  const cancelRef = useRef(false);
 
   const sentences = detail?.sentences ?? [];
 
   useEffect(() => {
     return () => {
+      cancelRef.current = true;
       if (timerRef.current) clearInterval(timerRef.current);
       speechPlayer.stop();
     };
@@ -449,8 +468,6 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
     const en = sentences.map((s) => s.en);
     const pt = sentences.map((s) => s.pt);
     switch (mode) {
-      case 1:
-        return en.join('. ');
       case 2: {
         const parts: string[] = [];
         sentences.forEach((s) => parts.push(s.pt, s.en));
@@ -465,21 +482,65 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
     }
   }, [sentences, mode]);
 
+  const stopPlayback = () => {
+    cancelRef.current = true;
+    speechPlayer.stop();
+    if (timerRef.current) clearInterval(timerRef.current);
+    setPlaying(false);
+    setProgress(0);
+    setNowText(t('planets.tapToListen'));
+  };
+
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  /** Mode 1 — "English + pause": hear each sentence, a real silent gap to
+   * repeat it, then hear it again before moving on. Sequenced per-sentence
+   * (rather than one big joined clip) so an actual pause can be inserted. */
+  const playPauseForRepeat = async () => {
+    cancelRef.current = false;
+    setPlaying(true);
+    setProgress(0);
+    const total = sentences.length;
+    for (let i = 0; i < total; i++) {
+      if (cancelRef.current) return;
+      const s = sentences[i];
+      setNowText(`“${s.en}…”`);
+      const heard = await speechPlayer.speak(s.en);
+      if (cancelRef.current) return;
+      if (heard > 0) {
+        setNowText(t('planets.yourTurn'));
+        await sleep(REPEAT_PAUSE_MS);
+        if (cancelRef.current) return;
+        setNowText(`“${s.en}…”`);
+        await speechPlayer.speak(s.en);
+        if (cancelRef.current) return;
+      }
+      setProgress((i + 1) / Math.max(total, 1));
+    }
+    if (!cancelRef.current) {
+      setPlaying(false);
+      setNowText(t('planets.tapToListen'));
+    }
+  };
+
   const togglePlay = async () => {
     if (playing) {
-      speechPlayer.stop();
-      if (timerRef.current) clearInterval(timerRef.current);
-      setPlaying(false);
-      setProgress(0);
-      setNowText('Tap play to listen');
+      stopPlayback();
       return;
     }
+    if (sentences.length === 0) return;
+
+    if (mode === 1) {
+      playPauseForRepeat();
+      return;
+    }
+
     setPlaying(true);
     setProgress(0);
     const duration = await speechPlayer.speak(script);
     if (duration <= 0) {
       setPlaying(false);
-      setNowText('Could not load audio');
+      setNowText(t('planets.couldNotLoadAudio'));
       return;
     }
     setNowText(
@@ -487,7 +548,7 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
         ? `“${sentences[0].pt} — ${sentences[0].en}…”`
         : sentences[0]
           ? `“${sentences[0].en}…”`
-          : 'Listening…',
+          : t('planets.listening'),
     );
     const started = Date.now();
     timerRef.current = setInterval(() => {
@@ -496,7 +557,7 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
       if (p >= 1) {
         if (timerRef.current) clearInterval(timerRef.current);
         setPlaying(false);
-        setNowText('Tap play to listen');
+        setNowText(t('planets.tapToListen'));
       }
     }, 120);
   };
@@ -505,14 +566,18 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
     <View style={styles.audioCard}>
       <View style={styles.audioTopRow}>
         <Headphones size={16} color={SPACE_ACCENT} />
-        <Text style={styles.audioTitle}>Continuous audio</Text>
-        <Text style={styles.audioSub}>for the car · {sentences.length} sentences</Text>
+        <Text style={styles.audioTitle}>{t('planets.continuousAudio')}</Text>
+        <Text style={styles.audioSub}>
+          {t(plural(sentences.length, 'planets.forTheCarOne', 'planets.forTheCarOther'), {
+            count: sentences.length,
+          })}
+        </Text>
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.modeRow}>
-        {AUDIO_MODES.map((m, i) => (
+        {AUDIO_MODE_KEYS.map((key, i) => (
           <Pressable
-            key={m}
+            key={key}
             onPress={() => setMode(i)}
             style={[styles.modeChip, i === mode && styles.modeChipActive]}
           >
@@ -521,13 +586,17 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
             ) : i === 3 ? (
               <Shuffle size={11} color={i === mode ? SPACE_ACCENT : SPACE_TEXT_MUTED} />
             ) : null}
-            <Text style={[styles.modeChipText, i === mode && { color: SPACE_ACCENT }]}>{m}</Text>
+            <Text style={[styles.modeChipText, i === mode && { color: SPACE_ACCENT }]}>{t(key)}</Text>
           </Pressable>
         ))}
       </ScrollView>
 
       <View style={styles.audioControls}>
-        <Pressable onPress={togglePlay} style={styles.playBtn} accessibilityLabel={playing ? 'Pause' : 'Play'}>
+        <Pressable
+          onPress={togglePlay}
+          style={styles.playBtn}
+          accessibilityLabel={playing ? t('planets.pause') : t('planets.play')}
+        >
           {playing ? (
             <Pause size={20} color={SPACE_ACCENT} />
           ) : (
@@ -573,6 +642,7 @@ function GradientCta({ label, onPress, disabled }: { label: string; onPress: () 
 
 export function PlanetsScreen() {
   const insets = useSafeAreaInsets();
+  const t = useT();
   const { width } = useWindowDimensions();
   const { startLesson, setTab } = useUiStore();
   const { data: planets = [], isLoading } = usePlanets();
@@ -626,12 +696,12 @@ export function PlanetsScreen() {
   const continueLabel = !planet
     ? ''
     : locked
-      ? 'Locked'
+      ? t('planets.locked')
       : detailQuery.isLoading
-        ? 'Loading lessons…'
+        ? t('planets.loadingLessons')
         : allDone
-          ? 'Planet complete'
-          : `Continue lesson ${nextLesson?.position ?? 1}`;
+          ? t('planets.planetComplete')
+          : t('planets.continueLesson', { position: nextLesson?.position ?? 1 });
 
   const continueReady = !locked && !detailQuery.isLoading && (!!nextLesson || allDone);
 
@@ -639,26 +709,30 @@ export function PlanetsScreen() {
     <View style={styles.screen}>
       {/* fixed top bar */}
       <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
-        <Pressable style={styles.roundBtn} onPress={() => setTab('chat')} hitSlop={8} accessibilityLabel="Back">
+        <Pressable style={styles.roundBtn} onPress={() => setTab('chat')} hitSlop={8} accessibilityLabel={t('planets.back')}>
           <ChevronLeft size={20} color={SPACE_TEXT} />
         </Pressable>
-        <View style={styles.rocketPill}>
-          <Rocket size={13} color={SPACE_ACCENT} />
-          <Text style={styles.rocketPillText}>{mastery}%</Text>
+        <View style={styles.headerCenter}>
+          <View style={styles.rocketPill}>
+            <Rocket size={13} color={SPACE_ACCENT} />
+            <Text style={styles.rocketPillText}>{mastery}%</Text>
+          </View>
+          <StreakXpBar dark />
         </View>
+        <LanguageSwitch dark />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
         {isLoading || !planet ? (
           <View style={styles.centerState}>
             <Loader2 size={26} color={SPACE_TEXT_FAINT} />
-            <Text style={styles.centerText}>Traveling to the planets…</Text>
+            <Text style={styles.centerText}>{t('planets.traveling')}</Text>
           </View>
         ) : (
           <>
             {/* centered planet header */}
             <View style={styles.titleBlock}>
-              <Text style={styles.planetTag}>Planet {planet.number}</Text>
+              <Text style={styles.planetTag}>{t('planets.planetTag', { number: planet.number })}</Text>
               <Text style={styles.planetName}>{planet.title.toUpperCase()}</Text>
               {subtitleParts[0] && <Text style={styles.planetSubtitle}>{subtitleParts[0]}</Text>}
               {subtitleParts[1] && <Text style={styles.planetSubtitleMuted}>{subtitleParts[1]}</Text>}
@@ -761,7 +835,7 @@ export function PlanetsScreen() {
                 onPress={() => goTo(index - 1)}
                 disabled={index === 0}
                 hitSlop={6}
-                accessibilityLabel="Previous planet"
+                accessibilityLabel={t('planets.previousPlanet')}
               >
                 <ChevronLeft size={22} color="#FFFFFF" />
               </Pressable>
@@ -770,7 +844,7 @@ export function PlanetsScreen() {
                 onPress={() => goTo(index + 1)}
                 disabled={index === planets.length - 1}
                 hitSlop={6}
-                accessibilityLabel="Next planet"
+                accessibilityLabel={t('planets.nextPlanet')}
               >
                 <ChevronRight size={22} color="#FFFFFF" />
               </Pressable>
@@ -796,11 +870,11 @@ export function PlanetsScreen() {
 
               {/* lessons */}
               <View style={styles.lessonsHeader}>
-                <Text style={styles.lessonsTitle}>Lessons</Text>
+                <Text style={styles.lessonsTitle}>{t('planets.lessons')}</Text>
                 <Pressable style={styles.audioToggle} onPress={() => setAudioOpen((o) => !o)} hitSlop={6}>
                   <Headphones size={14} color={audioOpen ? '#FFFFFF' : SPACE_ACCENT} />
                   <Text style={[styles.audioToggleText, audioOpen && { color: '#FFFFFF' }]}>
-                    {audioOpen ? 'Hide audio' : 'Listen in the car'}
+                    {audioOpen ? t('planets.hideAudio') : t('planets.listenInCar')}
                   </Text>
                 </Pressable>
               </View>
@@ -810,7 +884,7 @@ export function PlanetsScreen() {
               {detailQuery.isLoading && !detail ? (
                 <View style={styles.centerState}>
                   <Loader2 size={20} color={SPACE_TEXT_FAINT} />
-                  <Text style={styles.centerText}>Loading lessons…</Text>
+                  <Text style={styles.centerText}>{t('planets.loadingLessons')}</Text>
                 </View>
               ) : (
                 <>
@@ -824,7 +898,7 @@ export function PlanetsScreen() {
                   ))}
                   {lessons.length === 0 && (
                     <View style={styles.centerState}>
-                      <Text style={styles.centerText}>No lessons yet.</Text>
+                      <Text style={styles.centerText}>{t('planets.noLessons')}</Text>
                     </View>
                   )}
                 </>
@@ -871,6 +945,11 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   rocketPill: {
     flexDirection: 'row',

@@ -30,7 +30,10 @@ function passwordStrength(pw: string): Strength {
     { labelKey: 'auth.register.strengthGood', color: colors.primary, score: 4 },
     { labelKey: 'auth.register.strengthStrong', color: colors.success, score: 5 },
   ];
-  return map[Math.min(score, map.length) - 1];
+  // score can be 0 (a non-empty password that fails every criterion, e.g.
+  // the very first keystroke) — clamp so that still maps to the weakest
+  // tier instead of indexing map[-1] (undefined -> crash on render).
+  return map[Math.max(0, Math.min(score, map.length) - 1)];
 }
 
 export function RegisterScreen({ navigation }: Props) {
