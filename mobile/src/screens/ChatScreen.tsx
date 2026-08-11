@@ -21,6 +21,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppTabBar } from '../components/AppTabBar';
+import { LanguageSwitch } from '../components/LanguageSwitch';
 import {
   useAddCorrection,
   useAddMessage,
@@ -413,15 +414,15 @@ export function ChatScreen() {
   const liveActive = isLive && voice.status !== 'idle' && voice.status !== 'error';
   const orbLabel = isLive
     ? voice.status === 'connecting'
-      ? '…'
+      ? t('chat.orb.connecting')
       : voice.status === 'speaking'
-        ? 'Stop'
+        ? t('chat.orb.stop')
         : liveActive
-          ? 'Stop'
-          : 'Start'
+          ? t('chat.orb.stop')
+          : t('chat.orb.start')
     : demoPlaying
-      ? 'Stop'
-      : 'Play';
+      ? t('chat.orb.stop')
+      : t('chat.orb.play');
 
   const onOrbPress = async () => {
     if (mode === 'demo') {
@@ -448,15 +449,15 @@ export function ChatScreen() {
 
   const liveHint = isLive
     ? voice.status === 'connecting'
-      ? 'Connecting to your tutor…'
+      ? t('chat.hint.connecting')
       : voice.status === 'speaking'
-        ? 'Tutor is speaking — tap to interrupt'
+        ? t('chat.hint.tutorSpeaking')
         : liveActive
-          ? 'Mic is live — just talk. Tap to end.'
-          : 'Tap to start the conversation'
+          ? t('chat.hint.micLive')
+          : t('chat.hint.tapToStart')
     : demoPlaying
-      ? 'Demo lesson · tap to pause'
-      : 'Paused · tap to resume';
+      ? t('chat.hint.demoPause')
+      : t('chat.hint.demoResume');
 
   const lessonLoaded = mode === 'demo' && demoSteps.length === 0;
 
@@ -464,19 +465,22 @@ export function ChatScreen() {
     <View style={styles.screen}>
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <View style={styles.headerLeft}>
-          <Text style={styles.headerGreeting}>Hi, {firstName}</Text>
+          <Text style={styles.headerGreeting}>{t('chat.greeting', { name: firstName })}</Text>
           <View style={styles.planetPill}>
             <View style={[styles.planetDot, { backgroundColor: planet?.color ?? colors.primary }]} />
             <Text style={styles.planetPillText}>
-              {planet ? `Planet ${planet.number} · ${planet.title}` : 'Loading planets…'}
+              {planet
+                ? t('chat.planetPill', { number: planet.number, title: planet.title })
+                : t('chat.loadingPlanets')}
             </Text>
           </View>
         </View>
         <View style={styles.headerRight}>
+          <LanguageSwitch />
           <Pressable
             style={styles.headerIconBtn}
             onPress={signOut}
-            accessibilityLabel="Log out"
+            accessibilityLabel={t('chat.logOut')}
             hitSlop={8}
           >
             <LogOut size={18} color={colors.textMuted} />
@@ -486,20 +490,20 @@ export function ChatScreen() {
               style={[styles.modeBtn, mode === 'demo' && styles.modeBtnActive]}
               onPress={() => switchMode('demo')}
             >
-              <Text style={[styles.modeText, mode === 'demo' && styles.modeTextActive]}>Demo</Text>
+              <Text style={[styles.modeText, mode === 'demo' && styles.modeTextActive]}>{t('chat.modeDemo')}</Text>
             </Pressable>
             <Pressable
               style={[styles.modeBtn, mode === 'live' && styles.modeBtnActive]}
               onPress={() => switchMode('live')}
             >
               <Mic size={13} color={mode === 'live' ? colors.textOnPrimary : colors.textMuted} />
-              <Text style={[styles.modeText, mode === 'live' && styles.modeTextActive]}>Live</Text>
+              <Text style={[styles.modeText, mode === 'live' && styles.modeTextActive]}>{t('chat.modeLive')}</Text>
             </Pressable>
           </View>
           <Pressable
             style={[styles.headerIconBtn, showHistory && styles.headerIconBtnActive]}
             onPress={() => setShowHistory((s) => !s)}
-            accessibilityLabel="Conversation history"
+            accessibilityLabel={t('chat.history')}
           >
             <ListChecks size={20} color={showHistory ? colors.textOnPrimary : colors.textMuted} />
           </Pressable>
@@ -538,22 +542,18 @@ export function ChatScreen() {
             <View style={styles.sessionBanner}>
               <Sparkles size={14} color={colors.primary} />
               <Text style={styles.sessionBannerText}>
-                {isLive
-                  ? 'Live session · automatically transcribed'
-                  : 'Lesson · automatically transcribed'}
+                {isLive ? t('chat.sessionLive') : t('chat.sessionDemo')}
               </Text>
             </View>
             {lessonLoaded && !lessonQuery.isError && (
               <View style={styles.loadingRow}>
                 <Loader2 size={16} color={colors.textFaint} />
-                <Text style={styles.loadingText}>Preparing your lesson…</Text>
+                <Text style={styles.loadingText}>{t('chat.preparingLesson')}</Text>
               </View>
             )}
             {mode === 'demo' && lessonQuery.isError && (
               <Pressable style={styles.errorBanner} onPress={() => lessonQuery.refetch()}>
-                <Text style={styles.errorBannerText}>
-                  Couldn’t load the lesson. Check the backend and tap to retry.
-                </Text>
+                <Text style={styles.errorBannerText}>{t('chat.lessonError')}</Text>
               </Pressable>
             )}
             {messages.map((m) => (
@@ -563,13 +563,13 @@ export function ChatScreen() {
               liveActive && (
                 <View style={styles.listeningRow}>
                   <View style={styles.listeningDot} />
-                  <Text style={styles.listeningText}>Listening…</Text>
+                  <Text style={styles.listeningText}>{t('chat.listening')}</Text>
                 </View>
               )
             ) : (
               <View style={styles.listeningRow}>
                 <View style={[styles.listeningDot, !demoPlaying && styles.listeningDotPaused]} />
-                <Text style={styles.listeningText}>{demoPlaying ? 'Listening…' : 'Paused'}</Text>
+                <Text style={styles.listeningText}>{demoPlaying ? t('chat.listening') : t('chat.paused')}</Text>
               </View>
             )}
           </ScrollView>
@@ -618,6 +618,7 @@ function HistoryList({
   onBack: () => void;
   topInset: number;
 }) {
+  const t = useT();
   const { data: conversations = [], isLoading } = useConversations();
 
   return (
@@ -627,23 +628,21 @@ function HistoryList({
           <ChevronLeft size={22} color={colors.text} />
         </Pressable>
         <View style={{ flex: 1 }}>
-          <Text style={styles.historyTitle}>History</Text>
-          <Text style={styles.historySub}>Your lessons & conversations</Text>
+          <Text style={styles.historyTitle}>{t('chat.history.title')}</Text>
+          <Text style={styles.historySub}>{t('chat.history.subtitle')}</Text>
         </View>
       </View>
       <ScrollView contentContainerStyle={styles.historyContent} showsVerticalScrollIndicator={false}>
         {isLoading ? (
           <View style={styles.historyEmpty}>
             <Loader2 size={30} color={colors.textFaint} />
-            <Text style={styles.historyEmptyBody}>Loading conversations…</Text>
+            <Text style={styles.historyEmptyBody}>{t('chat.history.loading')}</Text>
           </View>
         ) : conversations.length === 0 ? (
           <View style={styles.historyEmpty}>
             <CheckCircle2 size={36} color={colors.primary} />
-            <Text style={styles.historyEmptyTitle}>No conversations yet</Text>
-            <Text style={styles.historyEmptyBody}>
-              When you chat, everything is saved here for review.
-            </Text>
+            <Text style={styles.historyEmptyTitle}>{t('chat.history.empty')}</Text>
+            <Text style={styles.historyEmptyBody}>{t('chat.history.emptyBody')}</Text>
           </View>
         ) : (
           conversations.map((c) => <ConversationRow key={c.id} conversation={c} onPress={() => onOpen(c.id)} />)
@@ -654,7 +653,9 @@ function HistoryList({
 }
 
 function ConversationRow({ conversation, onPress }: { conversation: ConversationSummary; onPress: () => void }) {
-  const date = new Date(conversation.updated_at).toLocaleDateString(undefined, {
+  const t = useT();
+  const locale = useI18nStore((s) => s.locale);
+  const date = new Date(conversation.updated_at).toLocaleDateString(localeTag(locale), {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -670,7 +671,10 @@ function ConversationRow({ conversation, onPress }: { conversation: Conversation
           {conversation.title}
         </Text>
         <Text style={styles.convMeta}>
-          {conversation.message_count} messages · {date}
+          {t(plural(conversation.message_count, 'chat.history.messageCountOne', 'chat.history.messageCountOther'), {
+            count: conversation.message_count,
+          })}{' '}
+          · {date}
         </Text>
       </View>
       <ChevronLeft size={20} color={colors.textFaint} style={{ transform: [{ rotate: '180deg' }] }} />
@@ -687,6 +691,8 @@ function HistoryDetail({
   onBack: () => void;
   topInset: number;
 }) {
+  const t = useT();
+  const locale = useI18nStore((s) => s.locale);
   const { data: detail, isLoading } = useConversation(conversationId);
   const [playing, setPlaying] = useState<string | null>(null);
 
@@ -704,16 +710,16 @@ function HistoryDetail({
         </Pressable>
         <View style={{ flex: 1 }}>
           <Text style={styles.historyTitle} numberOfLines={1}>
-            {detail?.title ?? 'Conversation'}
+            {detail?.title ?? t('chat.history.defaultTitle')}
           </Text>
-          <Text style={styles.historySub}>Transcript & corrections</Text>
+          <Text style={styles.historySub}>{t('chat.history.transcript')}</Text>
         </View>
       </View>
       <ScrollView contentContainerStyle={styles.historyContent} showsVerticalScrollIndicator={false}>
         {isLoading ? (
           <View style={styles.historyEmpty}>
             <Loader2 size={30} color={colors.textFaint} />
-            <Text style={styles.historyEmptyBody}>Loading…</Text>
+            <Text style={styles.historyEmptyBody}>{t('chat.history.detailLoading')}</Text>
           </View>
         ) : (
           <>
@@ -724,7 +730,10 @@ function HistoryDetail({
                   <View style={[styles.bubble, isUser ? styles.bubbleUser : styles.bubbleTutor]}>
                     <Text style={isUser ? styles.bubbleTextUser : styles.bubbleTextTutor}>{m.text}</Text>
                     <Text style={styles.bubbleTime}>
-                      {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(m.created_at).toLocaleTimeString(localeTag(locale), {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
                     </Text>
                   </View>
                 </View>
@@ -751,13 +760,15 @@ function HistoryDetail({
                   onPress={() => hear(c.corrected, c.id)}
                 >
                   <Volume2 size={14} color={colors.primary} />
-                  <Text style={styles.chipText}>{playing === c.id ? 'Playing…' : 'Pronunciation'}</Text>
+                  <Text style={styles.chipText}>
+                    {playing === c.id ? t('chat.correction.playing') : t('chat.correction.pronunciation')}
+                  </Text>
                 </Pressable>
               </View>
             ))}
             {(detail?.corrections ?? []).length === 0 && (detail?.messages ?? []).length === 0 && (
               <View style={styles.historyEmpty}>
-                <Text style={styles.historyEmptyBody}>This conversation has no messages yet.</Text>
+                <Text style={styles.historyEmptyBody}>{t('chat.history.noMessages')}</Text>
               </View>
             )}
           </>
