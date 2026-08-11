@@ -73,14 +73,19 @@ const GOLD = '#C9A227';
 const GOLD_DEEP = '#8B6A1F';
 
 /** Audio-mode labels for one course. The base→target chip is built from the
- * planet's course language instead of a hardcoded "PT → EN": Spanish
- * learners hear "PT → ES", Portuguese learners "EN → PT". */
-function audioModeLabels(t: ReturnType<typeof useT>, language: string): string[] {
-  const base = language === 'pt' ? 'EN' : 'PT';
-  const target = language === 'pt' ? 'PT' : language.toUpperCase();
+ * planet's course pair instead of a hardcoded "PT → EN": Portuguese speakers
+ * see "PT → EN", Spanish speakers "ES → EN" or "ES → PT", English speakers
+ * "EN → ES" or "EN → PT". */
+function audioModeLabels(
+  t: ReturnType<typeof useT>,
+  baseLanguage: string,
+  language: string,
+): string[] {
+  const base = baseLanguage.toUpperCase();
+  const target = language.toUpperCase();
   return [
-    t('planets.audioModeEnglishOnly'),
-    t('planets.audioModeEnglishPause'),
+    t('planets.audioModeLanguageOnly'),
+    t('planets.audioModeLanguagePause'),
     `${base} → ${target}`,
     t('planets.audioModeRandom'),
     t('planets.audioModeHardReview'),
@@ -456,7 +461,7 @@ function AudioPanel({ detail, planet }: { detail: PlanetDetail | undefined; plan
   const t = useT();
   const user = useAuthStore((s) => s.user);
   const [mode, setMode] = useState(0);
-  const modeLabels = audioModeLabels(t, planet.language);
+  const modeLabels = audioModeLabels(t, planet.base_language, planet.language);
   // The learner's chosen tutor voice speaks the continuous audio too; falls
   // back to the course default when none was picked.
   const voice = effectiveVoice(user?.voice ?? '', planet.language);

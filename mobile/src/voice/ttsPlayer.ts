@@ -45,9 +45,13 @@ class SpeechPlayer {
     // Don't overlap clips: a new speak cancels whatever is playing.
     await this.stop();
     if (voice !== undefined && !opts?.ephemeral) this.currentVoice = voice;
+    // An explicit voice always wins — including ephemeral previews, which
+    // must NOT touch this.currentVoice but still need to be heard with the
+    // voice being auditioned (otherwise every preview sounds the same).
+    const speakWith = voice ?? this.currentVoice;
     try {
       const ctx = await this.getContext();
-      const bytes = await getSpeech(text, undefined, this.currentVoice);
+      const bytes = await getSpeech(text, undefined, speakWith);
       const buffer = await ctx.decodeAudioData(bytes);
       if (buffer.length === 0) return 0;
 

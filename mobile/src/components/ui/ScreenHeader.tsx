@@ -3,6 +3,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { IconButton } from './IconButton';
+import { useT } from '../../i18n';
 import { colors, ICON_BUTTON_SIZE, radius, spacing, typography } from '../../theme';
 
 type Props = {
@@ -36,6 +37,7 @@ export function ScreenHeader({
   variant = 'light',
   centerTitle,
 }: Props) {
+  const t = useT();
   const insets = useSafeAreaInsets();
   const onPurple = variant === 'purple';
   const centered = centerTitle ?? onPurple;
@@ -44,7 +46,7 @@ export function ScreenHeader({
     <IconButton
       onPress={onBack}
       variant={onPurple ? 'plain' : 'surface'}
-      accessibilityLabel="Back"
+      accessibilityLabel={t('common.back')}
     >
       <ChevronLeft size={22} color={onPurple ? '#FFFFFF' : colors.text} />
     </IconButton>

@@ -82,6 +82,7 @@ async fn main() {
         .nest("/api/flashcards", api::flashcards::router())
         .nest("/api/gamification", api::gamification::router())
         .nest("/api/tts", api::tts::router(state.clone()))
+        .nest("/api/voices", api::voices::router())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state);

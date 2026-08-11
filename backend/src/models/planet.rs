@@ -4,7 +4,9 @@ use diesel::{Queryable, Selectable};
 use serde_json::Value;
 use uuid::Uuid;
 
-/// A planet in the course path (Mercury … Neptune).
+/// A planet in the course path (Mercury … Neptune). Field order MUST match the
+/// `planets` table column order (diesel maps `Queryable` positionally):
+/// `base_language` was appended after `language` by a migration.
 #[derive(Debug, Queryable, Selectable)]
 #[diesel(table_name = planets)]
 pub struct Planet {
@@ -16,8 +18,10 @@ pub struct Planet {
     pub topics: Value,
     pub unlock_mastery: f64,
     pub created_at: DateTime<Utc>,
-    /// Which target language this planet belongs to: 'en' | 'es' | 'pt'.
+    /// Which language this planet teaches (the target): 'en' | 'es' | 'pt'.
     pub language: String,
+    /// The explanation language of this course (the learner's own): 'en' | 'es' | 'pt'.
+    pub base_language: String,
 }
 
 /// A user's per-planet progress row. `mastery` is always the computed average
@@ -86,12 +90,68 @@ pub struct Sentence {
 
 /// Picks the (target, base) sentence texts for a course: the target goes in
 /// the `en` slot (the "front" text the app teaches), the base translation in
-/// `pt` (the "back").
-pub fn sentence_texts(s: &Sentence, language: &str) -> (String, String) {
-    match language {
-        "es" => (s.es.clone(), s.pt.clone()),
-        "pt" => (s.pt.clone(), s.en.clone()),
+/// `pt` (the "back"). Every row carries all three languages, but the unused
+/// slot may be empty for the newer (base, target) pairs, so the pair decides.
+pub fn sentence_texts(s: &Sentence, target: &str, base: &str) -> (String, String) {
+    match (target, base) {
+        ("es", "pt") => (s.es.clone(), s.pt.clone()),
+        ("pt", "en") => (s.pt.clone(), s.en.clone()),
+        ("en", "es") => (s.en.clone(), s.es.clone()),
+        ("es", "en") => (s.es.clone(), s.en.clone()),
+        ("pt", "es") => (s.pt.clone(), s.es.clone()),
+        // ("en", "pt") and any legacy fallback
         _ => (s.en.clone(), s.pt.clone()),
+    }
+}
+
+/// When only a target is known, which base language the course explains from.
+/// 'en'/'es' courses were originally taught from Portuguese, 'pt' from English.
+pub fn default_base_for(target: &str) -> &'static str {
+    match target {
+        "pt" => "en",
+        _ => "pt",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{default_base_for, sentence_texts, Sentence};
+    use uuid::Uuid;
+
+    fn sample() -> Sentence {
+        Sentence {
+            id: Uuid::nil(),
+            planet_id: Uuid::nil(),
+            position: 1,
+            en: "Good morning".into(),
+            pt: "Bom dia".into(),
+            subject: String::new(),
+            verb: String::new(),
+            complement: String::new(),
+            es: "Buenos días".into(),
+        }
+    }
+
+    /// Every (target, base) pair must read the right columns — the newest
+    /// courses leave the unused slot empty, so a wrong mapping would surface
+    /// empty front/back texts in the app.
+    #[test]
+    fn sentence_texts_cover_all_six_pairs() {
+        let s = sample();
+        assert_eq!(sentence_texts(&s, "en", "pt"), ("Good morning".into(), "Bom dia".into()));
+        assert_eq!(sentence_texts(&s, "es", "pt"), ("Buenos días".into(), "Bom dia".into()));
+        assert_eq!(sentence_texts(&s, "pt", "en"), ("Bom dia".into(), "Good morning".into()));
+        assert_eq!(sentence_texts(&s, "en", "es"), ("Good morning".into(), "Buenos días".into()));
+        assert_eq!(sentence_texts(&s, "es", "en"), ("Buenos días".into(), "Good morning".into()));
+        assert_eq!(sentence_texts(&s, "pt", "es"), ("Bom dia".into(), "Buenos días".into()));
+    }
+
+    #[test]
+    fn default_base_falls_back_sensibly() {
+        assert_eq!(default_base_for("pt"), "en");
+        assert_eq!(default_base_for("en"), "pt");
+        assert_eq!(default_base_for("es"), "pt");
+        assert_eq!(default_base_for("xx"), "pt");
     }
 }
 
@@ -125,6 +185,7 @@ pub struct ActivePlanet {
     pub id: Uuid,
     pub number: i32,
     pub title: String,
+    pub base_language: String,
     pub language: String,
 }
 

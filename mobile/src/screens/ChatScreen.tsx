@@ -46,6 +46,7 @@ import { localeTag, plural, useI18nStore, useT } from '../i18n';
 import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing, typography } from '../theme';
+import { displayName } from '../utils/userName';
 import { audioLevels } from '../voice/audioLevels';
 import { useVoiceConversation, type ToolCallHandler } from '../voice/useVoiceConversation';
 import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
@@ -307,7 +308,7 @@ export function ChatScreen() {
   const planetRef = useRef(planet);
   planetRef.current = planet;
 
-  const firstName = user?.email.split('@')[0] ?? t('chat.guestName');
+  const firstName = displayName(user) || t('chat.guestName');
 
   /** Creates (once) and returns the backend conversation for this session. */
   const ensureConversation = async (): Promise<string | null> => {

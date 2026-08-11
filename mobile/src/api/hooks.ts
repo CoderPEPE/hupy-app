@@ -24,6 +24,7 @@ import {
   getConversations,
 } from './conversations';
 import { getGamificationStats } from './gamification';
+import { getVoices } from './voices';
 import { storage, StorageKeys } from '../storage';
 import type { CardRating } from '../types';
 
@@ -37,20 +38,29 @@ export const queryKeys = {
   conversation: (id: string) => ['conversations', id] as const,
   gamification: ['gamification'] as const,
   catalog: ['catalog'] as const,
+  voices: ['voices'] as const,
 };
 
 /** Real course-content counts for the selected course, used by the pre-login
- * screens. The course comes from the target-language picker (default 'en'). */
+ * screens. The course is the (base, target) pair from the language picker
+ * (defaults: Portuguese base, English target). */
 export function useCatalogStats() {
+  const baseLanguage = storage.getString(StorageKeys.baseLanguage) ?? 'pt';
   const language = storage.getString(StorageKeys.targetLanguage) ?? 'en';
   return useQuery({
-    queryKey: [...queryKeys.catalog, language],
-    queryFn: () => getCatalogStats(language),
+    queryKey: [...queryKeys.catalog, baseLanguage, language],
+    queryFn: () => getCatalogStats(baseLanguage, language),
   });
 }
 
 export function useGamificationStats() {
   return useQuery({ queryKey: queryKeys.gamification, queryFn: getGamificationStats });
+}
+
+/** The tutor voice catalog from the backend. It changes about never, so it is
+ * fetched once per app run and reused. */
+export function useTutorVoices() {
+  return useQuery({ queryKey: queryKeys.voices, queryFn: getVoices, staleTime: Infinity });
 }
 
 // ---------------------------------------------------------------------------

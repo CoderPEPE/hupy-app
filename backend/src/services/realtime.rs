@@ -22,14 +22,21 @@ pub fn voice_for(language: &str) -> &'static str {
     }
 }
 
-/// (target language name, base language name) for a course. 'en' and 'es'
-/// courses are taught from Portuguese; the 'pt' course from English.
-pub fn language_names(language: &str) -> (&'static str, &'static str) {
-    match language {
-        "es" => ("Spanish", "Portuguese"),
-        "pt" => ("Portuguese", "English"),
-        _ => ("English", "Portuguese"),
-    }
+/// (target language name, base language name) for a course. The base is the
+/// learner's own language (explanations), the target the one being taught —
+/// any of the six base→target pairs.
+pub fn language_names(base: &str, target: &str) -> (&'static str, &'static str) {
+    let target_name = match target {
+        "es" => "Spanish",
+        "pt" => "Portuguese",
+        _ => "English",
+    };
+    let base_name = match base {
+        "es" => "Spanish",
+        "pt" => "Portuguese",
+        _ => "English",
+    };
+    (target_name, base_name)
 }
 
 /// The tutor's method prompt.
@@ -183,10 +190,14 @@ pub fn display_name_from_email(email: &str) -> String {
 
 async fn learner_name(pool: &DbPool, user_id: Uuid) -> Result<String> {
     let user = repositories::users::find_by_id(pool, user_id).await?;
-    let email = user
-        .map(|u| u.email)
-        .ok_or_else(|| AppError::not_found("resource not found"))?;
-    Ok(display_name_from_email(&email))
+    let user = user.ok_or_else(|| AppError::not_found("resource not found"))?;
+    // Prefer the learner's real name (set at registration); fall back to the
+    // email local part for pre-existing accounts that never set one.
+    let name = user.name.trim();
+    if !name.is_empty() {
+        return Ok(name.to_string());
+    }
+    Ok(display_name_from_email(&user.email))
 }
 
 /// Builds the tutor's system prompt from real, per-user data: the active
@@ -207,15 +218,21 @@ pub struct TutorSession {
 
 pub async fn build_session(pool: &DbPool, user_id: Uuid) -> Result<TutorSession> {
     let user = repositories::users::find_by_id(pool, user_id).await?;
-    let language = user
+    let (base_language, language) = user
         .as_ref()
-        .map(|u| u.language.clone())
-        .unwrap_or_else(|| "en".into());
-    let (target_name, base_name) = language_names(&language);
-    let instructions = build_instructions_for(pool, user_id, &language).await?;
-    let voice = match user {
-        Some(u) if !u.voice.is_empty() => u.voice,
-        _ => voice_for(&language).to_string(),
+        .map(|u| (u.base_language.clone(), u.language.clone()))
+        .unwrap_or_else(|| ("pt".into(), "en".into()));
+    let (target_name, base_name) = language_names(&base_language, &language);
+    let instructions =
+        build_instructions_for(pool, user_id, &base_language, &language).await?;
+    // A voice stored before the catalog shrank (e.g. "onyx") would 400 the
+    // whole session, so anything not in the catalog falls back to the course
+    // default.
+    let stored = user.map(|u| u.voice).unwrap_or_default();
+    let voice = if !stored.is_empty() && repositories::voices::exists(pool, &stored).await? {
+        stored
+    } else {
+        voice_for(&language).to_string()
     };
     Ok(TutorSession {
         instructions,
@@ -228,21 +245,28 @@ pub async fn build_session(pool: &DbPool, user_id: Uuid) -> Result<TutorSession>
 async fn build_instructions_for(
     pool: &DbPool,
     user_id: Uuid,
+    base_language: &str,
     language: &str,
 ) -> Result<String> {
-    let (target_name, base_name) = language_names(language);
+    let (target_name, base_name) = language_names(base_language, language);
 
     let planet = services::planets::active_planet_for(pool, user_id).await?;
     // The active planet's course decides which columns hold the target text;
-    // it always matches the user's chosen language, but is authoritative.
-    let sentences =
-        repositories::planets::tutor_sentences(pool, user_id, planet.id, &planet.language)
-            .await?;
+    // it always matches the user's chosen pair, but is authoritative.
+    let sentences = repositories::planets::tutor_sentences(
+        pool,
+        user_id,
+        planet.id,
+        &planet.base_language,
+        &planet.language,
+    )
+    .await?;
     let cumulative = repositories::planets::cumulative_review_sample(
         pool,
         user_id,
         planet.number,
         8,
+        &planet.base_language,
         &planet.language,
     )
     .await?;
@@ -343,10 +367,13 @@ mod learner_name_tests {
     }
 
     #[test]
-    fn language_names_cover_all_courses() {
-        assert_eq!(super::language_names("en"), ("English", "Portuguese"));
-        assert_eq!(super::language_names("es"), ("Spanish", "Portuguese"));
-        assert_eq!(super::language_names("pt"), ("Portuguese", "English"));
+    fn language_names_cover_all_course_pairs() {
+        assert_eq!(super::language_names("pt", "en"), ("English", "Portuguese"));
+        assert_eq!(super::language_names("pt", "es"), ("Spanish", "Portuguese"));
+        assert_eq!(super::language_names("en", "pt"), ("Portuguese", "English"));
+        assert_eq!(super::language_names("es", "en"), ("English", "Spanish"));
+        assert_eq!(super::language_names("en", "es"), ("Spanish", "English"));
+        assert_eq!(super::language_names("es", "pt"), ("Portuguese", "Spanish"));
     }
 
     #[test]
@@ -355,5 +382,20 @@ mod learner_name_tests {
         assert_eq!(super::voice_for("es"), "coral");
         assert_eq!(super::voice_for("pt"), "shimmer");
         assert_eq!(super::voice_for("unknown"), "marin");
+    }
+
+    /// Every default (and so every fallback build_session can pick) must be
+    /// in the seeded catalog — those are the voices gpt-realtime accepts, and
+    /// anything else 400s the session on creation.
+    #[test]
+    fn language_defaults_are_seeded_voices() {
+        let seed = include_str!("../../migrations/2026-08-11-000009_tutor_voices/up.sql");
+        for lang in ["en", "es", "pt", "unknown"] {
+            let voice = super::voice_for(lang);
+            assert!(
+                seed.contains(&format!("('{voice}',")),
+                "default voice for {lang} is not in the tutor_voices catalog"
+            );
+        }
     }
 }

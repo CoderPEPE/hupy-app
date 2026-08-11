@@ -38,10 +38,12 @@ function passwordStrength(pw: string): Strength {
 
 export function RegisterScreen({ navigation }: Props) {
   const t = useT();
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{
+    name?: string;
     email?: string;
     password?: string;
     confirm?: string;
@@ -72,7 +74,7 @@ export function RegisterScreen({ navigation }: Props) {
   };
 
   const mutation = useMutation({
-    mutationFn: () => signUp(email.trim(), password),
+    mutationFn: () => signUp(email.trim(), password, name),
     onError: (err) => {
       const message = err instanceof Error ? err.message : t('common.somethingWrong');
       setFieldErrors((prev) => ({ ...prev, email: message }));
@@ -81,6 +83,7 @@ export function RegisterScreen({ navigation }: Props) {
 
   const handleSubmit = () => {
     const errors: typeof fieldErrors = {};
+    if (name.trim().length === 0) errors.name = t('auth.nameRequired');
     if (!isValidEmail(email)) errors.email = t('auth.emailInvalid');
     if (password.length < MIN_PASSWORD_LENGTH) {
       errors.password = t('auth.register.passwordTooShort', { min: MIN_PASSWORD_LENGTH });
@@ -103,6 +106,19 @@ export function RegisterScreen({ navigation }: Props) {
       title={t('auth.register.title')}
       subtitle={t('auth.register.subtitle')}
     >
+      <Animated.View style={fieldStyle}>
+        <AuthTextField
+          label={t('auth.name')}
+          value={name}
+          onChangeText={setName}
+          placeholder={t('auth.namePlaceholder')}
+          autoComplete="name"
+          autoCapitalize="words"
+          returnKeyType="next"
+          error={fieldErrors.name}
+        />
+      </Animated.View>
+
       <Animated.View style={fieldStyle}>
         <AuthTextField
           label={t('auth.email')}

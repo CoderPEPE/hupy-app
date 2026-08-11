@@ -51,12 +51,21 @@ pub async fn create(pool: &DbPool, new_user: &NewUser) -> Result<User> {
     .await
 }
 
-/// Changes which course the learner is on ('en' | 'es' | 'pt').
-pub async fn update_language(pool: &DbPool, user_id: Uuid, language: &str) -> Result<Option<User>> {
-    let language = language.to_string();
+/// Changes which course the learner is on. A course is the ordered pair
+/// (base_language, language) — the explanation language and the taught one.
+pub async fn update_course(
+    pool: &DbPool,
+    user_id: Uuid,
+    base_language: &str,
+    language: &str,
+) -> Result<Option<User>> {
+    let (base_language, language) = (base_language.to_string(), language.to_string());
     run_db(pool, move |conn| {
         let updated = diesel::update(users::table.find(user_id))
-            .set(users::language.eq(&language))
+            .set((
+                users::base_language.eq(&base_language),
+                users::language.eq(&language),
+            ))
             .returning(User::as_returning())
             .get_result(conn)
             .optional()?;
@@ -71,6 +80,20 @@ pub async fn update_voice(pool: &DbPool, user_id: Uuid, voice: &str) -> Result<O
     run_db(pool, move |conn| {
         let updated = diesel::update(users::table.find(user_id))
             .set(users::voice.eq(&voice))
+            .returning(User::as_returning())
+            .get_result(conn)
+            .optional()?;
+        Ok(updated)
+    })
+    .await
+}
+
+/// Changes the learner's display name.
+pub async fn update_name(pool: &DbPool, user_id: Uuid, name: &str) -> Result<Option<User>> {
+    let name = name.to_string();
+    run_db(pool, move |conn| {
+        let updated = diesel::update(users::table.find(user_id))
+            .set(users::name.eq(&name))
             .returning(User::as_returning())
             .get_result(conn)
             .optional()?;

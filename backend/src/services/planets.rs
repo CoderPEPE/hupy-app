@@ -70,6 +70,20 @@ pub fn lesson_completed(kind: &str, mastery: f64) -> bool {
     }
 }
 
+/// The four lesson kinds, in path order — the single source of truth for
+/// "how many lessons does a planet have".
+pub const LESSON_KINDS: [&str; 4] = ["learn", "practice", "test", "master"];
+
+/// How many of a planet's four lessons the given mastery has completed. The
+/// achievement rules count lessons with this, so a lesson badge and the lesson
+/// list can never disagree about what "completed" means.
+pub fn lessons_completed_count(mastery: f64) -> i64 {
+    LESSON_KINDS
+        .iter()
+        .filter(|kind| lesson_completed(kind, mastery))
+        .count() as i64
+}
+
 /// The "sentences" progress metric: mastered/total, 0 when the planet has no
 /// sentences.
 pub fn sentences_progress(mastered: i64, total: i64) -> f64 {
@@ -130,13 +144,14 @@ pub async fn bump_metric_delta(
 /// the list endpoint does.
 pub async fn active_planet_for(pool: &DbPool, user_id: Uuid) -> Result<ActivePlanet> {
     // Only the user's own course matters — the same planet numbers exist in
-    // three languages, so the status chain must never cross courses.
-    let language = repositories::users::find_by_id(pool, user_id)
+    // six base→target courses, so the status chain must never cross courses.
+    let (base_language, language) = repositories::users::find_by_id(pool, user_id)
         .await?
-        .map(|u| u.language)
-        .unwrap_or_else(|| "en".into());
+        .map(|u| (u.base_language, u.language))
+        .unwrap_or_else(|| ("pt".into(), "en".into()));
     run_db(pool, move |conn| {
         let all: Vec<Planet> = planets::table
+            .filter(planets::base_language.eq(&base_language))
             .filter(planets::language.eq(&language))
             .order(planets::number.asc())
             .load(conn)?;
@@ -160,6 +175,7 @@ pub async fn active_planet_for(pool: &DbPool, user_id: Uuid) -> Result<ActivePla
                 id: p.id,
                 number: p.number,
                 title: p.title.clone(),
+                base_language: p.base_language.clone(),
                 language: p.language.clone(),
             }),
             None => Err(AppError::internal("no planets configured")),

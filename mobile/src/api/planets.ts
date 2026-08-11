@@ -6,12 +6,14 @@ export function getPlanets() {
 }
 
 /** How much content one course contains. Public (no auth) so the pre-login
- * screens can state real figures instead of marketing claims; `language`
- * picks which course to count ('en' | 'es' | 'pt', default 'en'). */
+ * screens can state real figures instead of marketing claims; the (base,
+ * target) pair picks which course to count. */
 export type CatalogStats = { planets: number; sentences: number; lessons: number };
 
-export function getCatalogStats(language = 'en') {
-  return apiRequest<CatalogStats>(`/api/planets/catalog?language=${language}`);
+export function getCatalogStats(baseLanguage = 'pt', language = 'en') {
+  return apiRequest<CatalogStats>(
+    `/api/planets/catalog?base_language=${baseLanguage}&language=${language}`,
+  );
 }
 
 export function getPlanet(id: string) {

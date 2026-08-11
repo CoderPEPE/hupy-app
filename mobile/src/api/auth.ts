@@ -6,10 +6,16 @@ export type AuthResponse = {
   user: User;
 };
 
-export function register(email: string, password: string, language?: string) {
+export function register(
+  email: string,
+  password: string,
+  baseLanguage?: string,
+  language?: string,
+  name?: string,
+) {
   return apiRequest<AuthResponse>('/api/auth/register', {
     method: 'POST',
-    body: { email, password, language },
+    body: { email, password, base_language: baseLanguage, language, name },
   });
 }
 
@@ -24,12 +30,13 @@ export function me() {
   return apiRequest<User>('/api/auth/me', { auth: true });
 }
 
-/** Switches the learner's course on the backend ('en' | 'es' | 'pt'). */
-export function setLanguage(language: string) {
+/** Switches the learner's course on the backend — the ordered (base, target)
+ * pair of 'en' | 'es' | 'pt'. The base may be omitted to keep the current one. */
+export function setLanguage(language: string, baseLanguage?: string) {
   return apiRequest<User>('/api/auth/language', {
     method: 'POST',
     auth: true,
-    body: { language },
+    body: { language, base_language: baseLanguage },
   });
 }
 
@@ -40,5 +47,15 @@ export function setVoice(voice: string) {
     method: 'POST',
     auth: true,
     body: { voice },
+  });
+}
+
+/** Updates the learner's display name ('' falls back to the email-derived
+ * name). Every greeting and the tutor's spoken address use it. */
+export function setName(name: string) {
+  return apiRequest<User>('/api/auth/name', {
+    method: 'POST',
+    auth: true,
+    body: { name },
   });
 }

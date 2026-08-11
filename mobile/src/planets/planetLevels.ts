@@ -77,6 +77,27 @@ const SOURCES: Partial<Record<number, Partial<Record<PlanetVisualLevel, ImageSou
   },
 };
 
+/**
+ * Transparent cutouts of each planet, generated from the very art the Planets
+ * tab shows — the illustrated tile where one exists, the level art otherwise
+ * (scripts/generate-planet-orbs.py). For light surfaces, where the source
+ * images would show their opaque background square.
+ */
+const ORBS: Partial<Record<number, ImageSourcePropType>> = {
+  1: require('../../assets/planet-orbs/mercury.png'),
+  2: require('../../assets/planet-orbs/venus.png'),
+  3: require('../../assets/planet-orbs/earth.png'),
+  4: require('../../assets/planet-orbs/mars.png'),
+  5: require('../../assets/planet-orbs/jupiter.png'),
+  6: require('../../assets/planet-orbs/saturn.png'),
+  7: require('../../assets/planet-orbs/uranus.png'),
+  8: require('../../assets/planet-orbs/neptune.png'),
+};
+
+export function planetOrbSource(planetNumber: number): ImageSourcePropType | null {
+  return ORBS[planetNumber] ?? null;
+}
+
 export function planetSlug(number: number): string {
   return SLUG_BY_NUMBER[number] ?? `planet-${number}`;
 }

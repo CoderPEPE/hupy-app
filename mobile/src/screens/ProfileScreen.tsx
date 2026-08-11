@@ -1,33 +1,34 @@
 import {
-  Award,
   Check,
   ChevronRight,
   Flame,
   Globe,
-  Layers,
   LogOut,
-  MessageCircle,
   Mic,
-  Rocket,
   Settings,
-  Sparkles,
   Star,
   Trophy,
+  User,
   X,
 } from 'lucide-react-native';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGamificationStats, queryKeys } from '../api/hooks';
 import type { Badge } from '../api/gamification';
+import { AchievementsModal } from '../components/AchievementsModal';
+import { achievementIcon } from '../components/achievementIcons';
 import { AppTabBar } from '../components/AppTabBar';
+import { AuthTextField } from '../components/AuthTextField';
 import { LanguagePickerModal } from '../components/LanguagePickerModal';
+import { PrimaryButton } from '../components/PrimaryButton';
 import { ProfileBackdrop } from '../components/ProfileBackdrop';
 import { VoicePickerModal, currentVoiceLabel } from '../components/VoicePickerModal';
 import { Card, IconButton, ScreenHeader } from '../components/ui';
-import { useT, type TranslationKey } from '../i18n';
+import { languageKey, useT, type TranslationKey } from '../i18n';
 import { useAuthStore } from '../store/auth';
 import { colors, radius, shadows, spacing, typography } from '../theme';
+import { displayName } from '../utils/userName';
 
 const XP_PER_LEVEL = 100;
 
@@ -70,25 +71,12 @@ function StatColumn({
 
 /** The backend ships an `icon` slug per badge (see the badges table); map it
  * to the matching lucide glyph rather than showing one generic icon. */
-const BADGE_ICONS: Record<string, { Icon: React.ComponentType<{ size?: number; color?: string }>; tint: string; bg: string }> = {
-  sparkles: { Icon: Sparkles, tint: colors.gold, bg: colors.warningSoft },
-  layers: { Icon: Layers, tint: colors.primary, bg: colors.primarySoft },
-  'message-circle': { Icon: MessageCircle, tint: colors.primary, bg: colors.primarySoft },
-  flame: { Icon: Flame, tint: '#F97316', bg: colors.rating.hardSoft },
-  trophy: { Icon: Trophy, tint: colors.gold, bg: colors.warningSoft },
-  rocket: { Icon: Rocket, tint: colors.brand.accent, bg: colors.infoSoft },
-};
-
 function BadgeRow({ badge }: { badge: Badge }) {
-  const { Icon, tint, bg } = BADGE_ICONS[badge.icon] ?? {
-    Icon: Award,
-    tint: colors.primary,
-    bg: colors.primarySoft,
-  };
+  const { Icon } = achievementIcon(badge.icon);
   return (
     <Card row style={styles.badgeRow}>
-      <View style={[styles.badgeIcon, { backgroundColor: bg }]}>
-        <Icon size={20} color={tint} />
+      <View style={[styles.badgeIcon, { backgroundColor: colors.primarySoft }]}>
+        <Icon size={20} color={colors.primary} />
       </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.badgeTitle}>{badge.title}</Text>
@@ -127,6 +115,76 @@ function SettingsSheet({ visible, onClose, onSignOut }: { visible: boolean; onCl
   );
 }
 
+/** Sheet for editing the learner's display name. Saving persists to the
+ * backend; the header, chat greeting, voice-picker preview and the tutor's
+ * spoken address all pick the new name up from the user store. */
+function NameEditModal({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const t = useT();
+  const setName = useAuthStore((s) => s.setName);
+  const [value, setValue] = useState('');
+  const [error, setError] = useState<string | undefined>();
+  const [saving, setSaving] = useState(false);
+
+  // Seed the input with the current name on the open transition only — an
+  // unrelated user-store update while the modal is open must not wipe what
+  // the learner is typing (getState reads the user fresh at that moment).
+  useEffect(() => {
+    if (!visible) return;
+    setValue(displayName(useAuthStore.getState().user));
+    setError(undefined);
+  }, [visible]);
+
+  const save = async () => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setError(t('auth.nameRequired'));
+      return;
+    }
+    setSaving(true);
+    try {
+      await setName(trimmed);
+      onClose();
+    } catch {
+      setError(t('common.somethingWrong'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.sheetScrim} onPress={onClose}>
+        <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t('profile.editName')}</Text>
+            <IconButton onPress={onClose} accessibilityLabel={t('common.tryAgain')}>
+              <X size={18} color={colors.textMuted} />
+            </IconButton>
+          </View>
+          <AuthTextField
+            label={t('auth.name')}
+            value={value}
+            onChangeText={(v) => {
+              setValue(v);
+              if (error) setError(undefined);
+            }}
+            placeholder={t('auth.namePlaceholder')}
+            autoCapitalize="words"
+            autoComplete="name"
+            returnKeyType="done"
+            onSubmitEditing={save}
+            error={error}
+            autoFocus
+          />
+          <View style={styles.nameSaveRow}>
+            <PrimaryButton title={t('profile.saveName')} onPress={save} loading={saving} />
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 export function ProfileScreen() {
   const t = useT();
   const user = useAuthStore((s) => s.user);
@@ -135,8 +193,10 @@ export function ProfileScreen() {
   const queryClient = useQueryClient();
   const [languagePickerOpen, setLanguagePickerOpen] = useState(false);
   const [voicePickerOpen, setVoicePickerOpen] = useState(false);
+  const [nameEditOpen, setNameEditOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [showAllBadges, setShowAllBadges] = useState(false);
+  const [achievementsOpen, setAchievementsOpen] = useState(false);
 
   // Closing the language picker may have switched courses — refetch the
   // planet list, per-planet data and catalog so the app shows the new course.
@@ -147,11 +207,16 @@ export function ProfileScreen() {
   };
 
   const email = user?.email ?? '';
-  const firstName = email.split('@')[0] ?? '';
-  // The change-language row shows the learner's course (what they're
-  // learning), not the app's UI locale — those are now separate concerns.
-  const courseLabel =
-    user?.language === 'es' ? t('language.es') : user?.language === 'pt' ? t('language.pt') : t('language.en');
+  const firstName = displayName(user);
+  // The change-language row shows the learner's course as the ordered
+  // (base → target) pair — e.g. "Português → English" or "Español → English"
+  // — not the app's UI locale, which follows the base language.
+  // Both halves must resolve to a real language: before the user loads, the
+  // pair is unknown, and half a pair ("Português → language.undefined") is
+  // worse than none.
+  const baseKey = languageKey(user?.base_language ?? (user?.language === 'pt' ? 'en' : 'pt'));
+  const targetKey = languageKey(user?.language);
+  const courseLabel = baseKey && targetKey ? `${t(baseKey)} → ${t(targetKey)}` : '';
   // The voice row shows the name of the voice actually in effect — the
   // stored choice, or the course's default when none was picked yet.
   const voiceLabel = currentVoiceLabel(user?.voice ?? '', user?.language ?? 'en');
@@ -161,6 +226,9 @@ export function ProfileScreen() {
   const longest = gamification?.longest_streak ?? 0;
   const badges = gamification?.badges ?? [];
   const visibleBadges = showAllBadges ? badges : badges.slice(0, BADGE_PREVIEW_COUNT);
+  const achievements = gamification?.achievements ?? [];
+  const earnedCount = gamification?.earned_count ?? 0;
+  const totalCount = gamification?.total_count ?? achievements.length;
 
   return (
     <View style={styles.screen}>
@@ -233,7 +301,9 @@ export function ProfileScreen() {
             <Text style={styles.settingTitle}>{t('language.change')}</Text>
             <Text style={styles.settingSub}>{t('profile.changeLanguageSub')}</Text>
           </View>
-          <Text style={styles.settingValue}>{courseLabel}</Text>
+          <Text style={styles.settingValue} numberOfLines={1}>
+            {courseLabel}
+          </Text>
           <ChevronRight size={18} color={colors.textFaint} />
         </Card>
 
@@ -245,20 +315,36 @@ export function ProfileScreen() {
             <Text style={styles.settingTitle}>{t('voicePicker.title')}</Text>
             <Text style={styles.settingSub}>{t('profile.changeVoiceSub')}</Text>
           </View>
-          <Text style={styles.settingValue}>{voiceLabel}</Text>
+          <Text style={styles.settingValue} numberOfLines={1}>
+            {voiceLabel}
+          </Text>
+          <ChevronRight size={18} color={colors.textFaint} />
+        </Card>
+
+        <Card row style={styles.settingRow} onPress={() => setNameEditOpen(true)}>
+          <View style={styles.settingIcon}>
+            <User size={20} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.settingTitle}>{t('auth.name')}</Text>
+            <Text style={styles.settingSub}>{t('profile.changeNameSub')}</Text>
+          </View>
+          <Text style={styles.settingValue} numberOfLines={1}>
+            {firstName || t('profile.nameFallback')}
+          </Text>
           <ChevronRight size={18} color={colors.textFaint} />
         </Card>
 
         <View style={styles.badgesHeader}>
           <Text style={styles.badgesTitle}>{t('profile.badges')}</Text>
-          {badges.length > BADGE_PREVIEW_COUNT && (
-            <Pressable style={styles.viewAll} onPress={() => setShowAllBadges((v) => !v)} hitSlop={6}>
-              <Text style={styles.viewAllText}>
-                {showAllBadges ? t('profile.viewLess') : t('profile.viewAll')}
-              </Text>
-              <ChevronRight size={16} color={colors.primary} />
-            </Pressable>
-          )}
+          {/* Always available: the locked ones are the interesting part, so
+              this opens the full catalog rather than expanding in place. */}
+          <Pressable style={styles.viewAll} onPress={() => setAchievementsOpen(true)} hitSlop={6}>
+            <Text style={styles.viewAllText}>
+              {t('achievements.earnedOf', { earned: earnedCount, total: totalCount })}
+            </Text>
+            <ChevronRight size={16} color={colors.primary} />
+          </Pressable>
         </View>
 
         {badges.length === 0 ? (
@@ -273,6 +359,13 @@ export function ProfileScreen() {
       <AppTabBar />
       <LanguagePickerModal visible={languagePickerOpen} onClose={closeLanguagePicker} />
       <VoicePickerModal visible={voicePickerOpen} onClose={() => setVoicePickerOpen(false)} />
+      <NameEditModal visible={nameEditOpen} onClose={() => setNameEditOpen(false)} />
+      <AchievementsModal
+        visible={achievementsOpen}
+        onClose={() => setAchievementsOpen(false)}
+        achievements={achievements}
+        earnedCount={earnedCount}
+      />
       <SettingsSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} onSignOut={signOut} />
     </View>
   );
@@ -405,6 +498,11 @@ const styles = StyleSheet.create({
   settingValue: {
     ...typography.label,
     color: colors.text,
+    // Without a cap the value takes its full intrinsic width and leaves the
+    // flex:0-basis title with none, wrapping it one letter per line.
+    flexShrink: 1,
+    maxWidth: '45%',
+    textAlign: 'right',
   },
   badgesHeader: {
     flexDirection: 'row',
@@ -501,5 +599,8 @@ const styles = StyleSheet.create({
     ...typography.body,
     fontWeight: '800',
     color: colors.error,
+  },
+  nameSaveRow: {
+    marginTop: spacing.md,
   },
 });

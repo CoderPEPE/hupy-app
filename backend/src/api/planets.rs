@@ -70,8 +70,10 @@ pub struct PlanetSummary {
     pub color: String,
     pub topics: Value,
     pub created_at: DateTime<Utc>,
-    /// The course this planet belongs to: 'en' | 'es' | 'pt'. The client uses
-    /// it to label the target/base languages (audio modes, TTS voice).
+    /// The explanation language of this course ('en' | 'es' | 'pt').
+    pub base_language: String,
+    /// The taught (target) language: 'en' | 'es' | 'pt'. The client uses the
+    /// pair to label target/base languages (audio modes, TTS voice).
     pub language: String,
     /// "active" | "locked" | "completed"
     pub status: String,
@@ -155,8 +157,10 @@ pub struct CatalogStats {
 
 #[derive(Deserialize)]
 pub struct CatalogQuery {
-    /// Course to count ('en' | 'es' | 'pt'); defaults to 'en'.
+    /// Target language to count ('en' | 'es' | 'pt'); defaults to 'en'.
     pub language: Option<String>,
+    /// Base language of the course; defaults to the conventional base for the target.
+    pub base_language: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -187,8 +191,13 @@ async fn build_summary(
     let mastered = repositories::planets::mastered_sentence_count(pool, user_id, planet.id).await?;
     let total = repositories::planets::sentence_count(pool, planet.id).await?;
 
-    let prev =
-        repositories::planets::previous_planet(pool, planet.number, &planet.language).await?;
+    let prev = repositories::planets::previous_planet(
+        pool,
+        planet.number,
+        &planet.base_language,
+        &planet.language,
+    )
+    .await?;
     let prev_info = match prev {
         Some(p) => {
             let pp = repositories::planets::load_progress(pool, user_id, p.id).await?;
@@ -207,6 +216,7 @@ async fn build_summary(
         color: planet.color.clone(),
         topics: planet.topics.clone(),
         created_at: planet.created_at,
+        base_language: planet.base_language.clone(),
         language: planet.language.clone(),
         status,
         unlock_progress: unlock,
@@ -228,9 +238,15 @@ async fn catalog_stats(
         .language
         .as_deref()
         .filter(|l| matches!(*l, "en" | "es" | "pt"))
-        .unwrap_or("en");
+        .unwrap_or("en")
+        .to_string();
+    let base_language = q
+        .base_language
+        .as_deref()
+        .filter(|l| matches!(*l, "en" | "es" | "pt"))
+        .unwrap_or_else(|| crate::models::planet::default_base_for(&language));
     let (planets, sentences, lessons) =
-        repositories::planets::catalog_counts(&state.pool, language).await?;
+        repositories::planets::catalog_counts(&state.pool, base_language, &language).await?;
     Ok(Json(CatalogStats {
         planets,
         sentences,
@@ -242,14 +258,14 @@ async fn list_planets(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
 ) -> Result<Json<Vec<PlanetSummary>>> {
-    // The user's course decides which of the three parallel planet sets they
-    // see — the same Mercury..Neptune path exists in English, Spanish and
-    // Portuguese, so filtering here keeps progress chains inside one course.
-    let language = repositories::users::find_by_id(&state.pool, user_id)
+    // The user's course pair decides which of the six parallel planet sets
+    // they see — the same Mercury..Neptune path exists for every base→target
+    // pair, so filtering here keeps progress chains inside one course.
+    let (base_language, language) = repositories::users::find_by_id(&state.pool, user_id)
         .await?
-        .map(|u| u.language)
-        .unwrap_or_else(|| "en".into());
-    let all = repositories::planets::list_for_language(&state.pool, &language).await?;
+        .map(|u| (u.base_language, u.language))
+        .unwrap_or_else(|| ("pt".into(), "en".into()));
+    let all = repositories::planets::list_for_course(&state.pool, &base_language, &language).await?;
 
     // All progress rows for this user, keyed by planet id.
     let rows = repositories::planets::all_progress_for(&state.pool, user_id).await?;
@@ -285,6 +301,7 @@ async fn list_planets(
             color: p.color.clone(),
             topics: p.topics.clone(),
             created_at: p.created_at,
+            base_language: p.base_language.clone(),
             language: p.language.clone(),
             status,
             unlock_progress: unlock,
@@ -309,9 +326,13 @@ async fn planet_detail(
 
     let progress = repositories::planets::load_progress(&state.pool, user_id, planet_id).await?;
 
-    let prev =
-        repositories::planets::previous_planet(&state.pool, planet.number, &planet.language)
-            .await?;
+    let prev = repositories::planets::previous_planet(
+        &state.pool,
+        planet.number,
+        &planet.base_language,
+        &planet.language,
+    )
+    .await?;
     let prev_progress = match &prev {
         Some(p) => Some(repositories::planets::load_progress(&state.pool, user_id, p.id).await?),
         None => None,
@@ -337,8 +358,11 @@ async fn planet_detail(
         .await?
         .into_iter()
         .map(|s: Sentence| {
-            let (en, pt) =
-                crate::models::planet::sentence_texts(&s, &planet.language);
+            let (en, pt) = crate::models::planet::sentence_texts(
+                &s,
+                &planet.language,
+                &planet.base_language,
+            );
             SentenceJson {
                 id: s.id,
                 position: s.position,
@@ -383,6 +407,7 @@ async fn planet_detail(
         color: planet.color,
         topics: planet.topics,
         created_at: planet.created_at,
+        base_language: planet.base_language,
         language: planet.language,
         status,
         unlock_progress: unlock,

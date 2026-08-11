@@ -1,40 +1,69 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { Check, ChevronRight } from 'lucide-react-native';
 import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { Card, ScreenHeader } from '../components/ui';
+import { Dropdown, ScreenHeader, type DropdownOption } from '../components/ui';
 import type { AuthStackParamList } from '../navigation/RootNavigator';
-import { useI18nStore, useT } from '../i18n';
+import { localeForBaseLanguage, useI18nStore, useT, type Locale } from '../i18n';
 import { storage, StorageKeys } from '../storage';
 import { useAuthStore } from '../store/auth';
-import { colors, radius, spacing, typography } from '../theme';
+import { colors, spacing, typography } from '../theme';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'LanguageSelect'>;
 
-/** The learner's base (\"I speak\") languages. Toggling this also switches the
- * app's UI locale — the two always move together. */
-type SpeakCode = 'pt' | 'en';
+/** The learner's base (\"I speak\") languages. Switching base also switches the
+ * app's UI locale — the two always move together (Spanish speakers get a
+ * Spanish interface). */
+type SpeakCode = 'pt' | 'en' | 'es';
 
-/** Which courses are offered from each base. There is a real, fully-seeded
- * course for every target: English and Spanish taught from Portuguese, and
- * Portuguese taught from English (the same planet path, duplicated per
- * course on the backend). */
-const TARGETS_BY_SPEAK: Record<SpeakCode, { code: string; flag: string; name: string }[]> = {
-  pt: [
-    { code: 'en', flag: '🇺🇸', name: 'English' },
-    { code: 'es', flag: '🇪🇸', name: 'Español' },
-  ],
-  en: [{ code: 'pt', flag: '🇧🇷', name: 'Português' }],
+function isSpeakCode(value: string | undefined | null): value is SpeakCode {
+  return value === 'pt' || value === 'en' || value === 'es';
+}
+
+/** Display info for each of the three languages. */
+const LANGUAGES: Record<SpeakCode, { flag: string; name: string }> = {
+  pt: { flag: '🇧🇷', name: 'Português' },
+  en: { flag: '🇺🇸', name: 'English' },
+  es: { flag: '🇪🇸', name: 'Español' },
 };
 
-/** Reads the stored course, falling back to the first valid target for the
- * current base if the stored one no longer applies (e.g. stored 'pt' while
- * speaking Portuguese). */
-function initialTarget(speak: SpeakCode): string {
+/** The base languages, in the order the picker lists them. */
+const SPEAK_CODES: SpeakCode[] = ['pt', 'en', 'es'];
+
+/** Language codes -> dropdown options (flag + native name). */
+const dropdownOptions = (codes: SpeakCode[]): DropdownOption[] =>
+  codes.map((code) => ({ value: code, label: LANGUAGES[code].name, icon: LANGUAGES[code].flag }));
+
+/** Speak -> learn for the full matrix. There is a real, fully-seeded course
+ * for every one of the six (base, target) pairs on the backend — the same
+ * planet path, duplicated per course, with scripted lessons taught in the
+ * base language. */
+const TARGETS_BY_SPEAK: Record<SpeakCode, SpeakCode[]> = {
+  pt: ['en', 'es'],
+  en: ['pt', 'es'],
+  es: ['en', 'pt'],
+};
+
+/** Which base the stored course implies, when it's consistent. Falls back to
+ * the UI locale (device detection) on a fresh install with nothing stored.
+ * Only consulted when signed out — a signed-in learner's account wins, so the
+ * picker can't show "Português" while the account says Español. */
+function speakFromStorage(locale: Locale): SpeakCode {
+  const base = storage.getString(StorageKeys.baseLanguage);
+  if (base === 'pt' || base === 'en' || base === 'es') return base;
+  // Legacy: infer the base from the stored target (en/es were taught from pt).
+  const target = storage.getString(StorageKeys.targetLanguage);
+  if (target === 'en' || target === 'es') return 'pt';
+  if (target === 'pt') return 'en';
+  return locale === 'pt-BR' ? 'pt' : locale === 'es' ? 'es' : 'en';
+}
+
+/** Reads the stored target, falling back to the first valid one for the
+ * current base if the stored one no longer applies. */
+function initialTarget(speak: SpeakCode): SpeakCode {
   const stored = storage.getString(StorageKeys.targetLanguage);
-  if (stored && TARGETS_BY_SPEAK[speak].some((t) => t.code === stored)) return stored;
-  return TARGETS_BY_SPEAK[speak][0].code;
+  if (stored && (TARGETS_BY_SPEAK[speak] as string[]).includes(stored)) return stored as SpeakCode;
+  return TARGETS_BY_SPEAK[speak][0];
 }
 
 /** The picker's content, shared by the pre-login route (Auth stack, via
@@ -45,28 +74,36 @@ export function LanguagePickerScreen({ onDone }: { onDone: () => void }) {
   const t = useT();
   const locale = useI18nStore((s) => s.locale);
   const setLocale = useI18nStore((s) => s.setLocale);
-  const [speak, setSpeak] = useState<SpeakCode>(locale === 'pt-BR' ? 'pt' : 'en');
-  const [target, setTarget] = useState(() => initialTarget(locale === 'pt-BR' ? 'pt' : 'en'));
+  const user = useAuthStore((s) => s.user);
+  // The signed-in account is the source of truth; storage is the signed-out
+  // fallback. Reading storage first is what let the picker disagree with the
+  // course shown on the profile.
+  const initialSpeak = isSpeakCode(user?.base_language) ? user.base_language : speakFromStorage(locale);
+  const [speak, setSpeak] = useState<SpeakCode>(initialSpeak);
+  const [target, setTarget] = useState<SpeakCode>(() =>
+    isSpeakCode(user?.language) ? user.language : initialTarget(initialSpeak),
+  );
   const targets = TARGETS_BY_SPEAK[speak];
 
+  /** Persists the (base, target) pair to storage and, when logged in, to the
+   * backend so the next planet list is served from the new course. Best
+   * effort — a network failure must not block the UI. */
   const selectTarget = (code: string) => {
-    setTarget(code);
+    setTarget(code as SpeakCode);
+    storage.set(StorageKeys.baseLanguage, speak);
     storage.set(StorageKeys.targetLanguage, code);
-    // Logged-in learners switch their live course on the backend so the next
-    // planet list is served from the new course. Best effort — a network
-    // failure must not block the UI.
     if (useAuthStore.getState().token) {
-      useAuthStore.getState().setLanguage(code).catch(() => {});
+      useAuthStore.getState().setLanguage(code, speak).catch(() => {});
     }
   };
 
-  const toggleSpeak = () => {
-    const next: SpeakCode = speak === 'pt' ? 'en' : 'pt';
+  /** Picks the base language, switching the UI locale with it and
+   * re-resolving the target so the stored course stays valid. */
+  const selectSpeak = (next: SpeakCode) => {
     setSpeak(next);
-    setLocale(next === 'pt' ? 'pt-BR' : 'en');
-    // Re-routing through selectTarget keeps the stored course and the
-    // backend in sync even when the base switch changes which target is
-    // shown (e.g. stored 'es' + speak 'en' shows 'pt').
+    // Optimistic: switch the interface now, the account call confirms it.
+    const nextLocale = localeForBaseLanguage(next);
+    if (nextLocale) setLocale(nextLocale);
     selectTarget(initialTarget(next));
   };
 
@@ -79,37 +116,18 @@ export function LanguagePickerScreen({ onDone }: { onDone: () => void }) {
         <Text style={styles.subtitle}>{t('languagePicker.subtitle')}</Text>
 
         <Text style={styles.sectionLabel}>{t('languagePicker.iSpeak')}</Text>
-        <Card row style={styles.speakRow} onPress={toggleSpeak}>
-          <View style={styles.speakFlagBadge}>
-            <Text style={styles.speakFlag}>{speak === 'pt' ? '🇧🇷' : '🇺🇸'}</Text>
-          </View>
-          <Text style={styles.speakText}>{speak === 'pt' ? 'Português' : 'English'}</Text>
-          <ChevronRight size={18} color={colors.textFaint} />
-        </Card>
+        <Dropdown
+          value={speak}
+          options={dropdownOptions(SPEAK_CODES)}
+          onChange={(code) => selectSpeak(code as SpeakCode)}
+        />
 
         <Text style={styles.sectionLabel}>{t('languagePicker.iWantToLearn')}</Text>
-        <View style={styles.grid}>
-          {targets.map((lang) => {
-            const selected = target === lang.code;
-            return (
-              <Card
-                key={lang.code}
-                style={[styles.card, selected && styles.cardSelected]}
-                onPress={() => selectTarget(lang.code)}
-              >
-                <View style={styles.flagCircle}>
-                  <Text style={styles.flagEmoji}>{lang.flag}</Text>
-                </View>
-                <Text style={[styles.cardLabel, selected && styles.cardLabelSelected]}>{lang.name}</Text>
-                {selected && (
-                  <View style={styles.checkBadge}>
-                    <Check size={10} color="#FFFFFF" strokeWidth={3.5} />
-                  </View>
-                )}
-              </Card>
-            );
-          })}
-        </View>
+        <Dropdown
+          value={target}
+          options={dropdownOptions(targets)}
+          onChange={selectTarget}
+        />
       </ScrollView>
 
       <View style={styles.footer}>
@@ -151,77 +169,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     marginBottom: spacing.sm,
     color: colors.textMuted,
-  },
-  speakRow: {
-    padding: spacing.sm + 2,
-  },
-  speakFlagBadge: {
-    width: 30,
-    height: 30,
-    borderRadius: radius.round,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-  },
-  speakFlag: {
-    fontSize: 20,
-  },
-  speakText: {
-    ...typography.cardTitle,
-    flex: 1,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: spacing.sm,
-  },
-  card: {
-    width: '31.5%',
-    alignItems: 'center',
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.xs,
-  },
-  cardSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primarySoft,
-  },
-  flagCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.round,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.surface,
-  },
-  flagEmoji: {
-    fontSize: 24,
-  },
-  cardLabel: {
-    ...typography.caption,
-    marginTop: spacing.xs + 2,
-    fontWeight: '600',
-    color: colors.text,
-    textAlign: 'center',
-  },
-  cardLabelSelected: {
-    color: colors.primary,
-    fontWeight: '800',
-  },
-  checkBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   footer: {
     padding: spacing.lg,

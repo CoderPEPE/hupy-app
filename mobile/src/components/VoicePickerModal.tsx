@@ -3,11 +3,18 @@ import React, { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { PrimaryButton } from './PrimaryButton';
 import { Card, ScreenHeader } from './ui';
-import { useT, type TranslationKey } from '../i18n';
+import { useTutorVoices } from '../api/hooks';
+import { languageKey, useT, type TranslationKey } from '../i18n';
 import { useAuthStore } from '../store/auth';
 import { colors, radius, spacing, typography } from '../theme';
 import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
-import { TUTOR_VOICES, tutorVoiceById, voiceGreeting, type TutorVoiceGender } from '../voice/tutorVoices';
+import {
+  TUTOR_VOICES,
+  tutorVoiceById,
+  voiceGreeting,
+  type TutorVoice,
+  type TutorVoiceGender,
+} from '../voice/tutorVoices';
 
 const GENDER_LABEL: Record<TutorVoiceGender, TranslationKey> = {
   female: 'voicePicker.female',
@@ -23,19 +30,31 @@ export function VoicePickerModal({ visible, onClose }: { visible: boolean; onClo
   const user = useAuthStore((s) => s.user);
   const setVoice = useAuthStore((s) => s.setVoice);
   const [playing, setPlaying] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  // The catalog is served from the DB; the bundled list is the offline
+  // fallback so the picker is never empty.
+  const { data: catalog } = useTutorVoices();
+  const allVoices = catalog ?? TUTOR_VOICES;
 
   const course = user?.language ?? 'en';
-  const firstName = user?.email.split('@')[0] ?? '';
   // An empty stored voice means the course default is in effect — show that
   // as the current selection so the checkmark always reflects reality.
   const selected = effectiveVoice(user?.voice ?? '', course);
-  const languageName = t(`language.${course}` as TranslationKey);
+  const languageName = t(languageKey(course) ?? 'language.en');
 
   const play = async (voiceId: string) => {
     if (playing) return; // one preview at a time
     setPlaying(voiceId);
+    setFailed(null);
+    // The voice introduces itself by its own name, not the learner's.
     // Ephemeral: auditioning must not change the app's remembered voice.
-    await speechPlayer.speak(voiceGreeting(course, firstName), voiceId, { ephemeral: true });
+    const tutorName = allVoices.find((v) => v.id === voiceId)?.name ?? '';
+    const heard = await speechPlayer.speak(voiceGreeting(course, tutorName), voiceId, {
+      ephemeral: true,
+    });
+    // speak() swallows network/decode errors and returns 0 — say so instead of
+    // leaving a silent row that looks identical to a working one.
+    setFailed(heard > 0 ? null : voiceId);
     setPlaying(null);
   };
 
@@ -48,11 +67,12 @@ export function VoicePickerModal({ visible, onClose }: { visible: boolean; onClo
       .catch(() => {});
   };
 
-  const voices = (gender: TutorVoiceGender) => TUTOR_VOICES.filter((v) => v.gender === gender);
+  const voices = (gender: TutorVoiceGender) => allVoices.filter((v) => v.gender === gender);
 
-  const renderVoice = (v: (typeof TUTOR_VOICES)[number]) => {
+  const renderVoice = (v: TutorVoice) => {
     const isSelected = selected === v.id;
     const isPlaying = playing === v.id;
+    const isFailed = failed === v.id;
     return (
       <Card key={v.id} row style={[styles.voiceRow, isSelected && styles.voiceRowSelected]} onPress={() => select(v.id)}>
         <View style={[styles.voiceIcon, v.gender === 'female' ? styles.voiceIconFemale : styles.voiceIconMale]}>
@@ -70,7 +90,11 @@ export function VoicePickerModal({ visible, onClose }: { visible: boolean; onClo
         >
           <Volume2 size={14} color={isPlaying ? colors.textOnPrimary : colors.primary} />
           <Text style={[styles.playChipText, isPlaying && styles.playChipTextActive]}>
-            {isPlaying ? t('voicePicker.playing') : t('voicePicker.play')}
+            {isPlaying
+              ? t('voicePicker.playing')
+              : isFailed
+                ? t('voicePicker.playFailed')
+                : t('voicePicker.play')}
           </Text>
         </Pressable>
         <View style={[styles.checkBadge, isSelected && styles.checkBadgeOn]}>

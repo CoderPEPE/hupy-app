@@ -7,6 +7,9 @@ export const en = {
   // Common
   'common.somethingWrong': 'Something went wrong',
   'common.tryAgain': 'Try again',
+  // Screen-reader labels for the shared header/close icon buttons.
+  'common.back': 'Back',
+  'common.close': 'Close',
 
   // Language switcher
   'language.change': 'Change language',
@@ -25,6 +28,9 @@ export const en = {
   'auth.password': 'Password',
   'auth.showPassword': 'Show password',
   'auth.hidePassword': 'Hide password',
+  'auth.name': 'Name',
+  'auth.namePlaceholder': 'What should we call you?',
+  'auth.nameRequired': 'Enter your name',
   'auth.emailInvalid': 'Enter a valid email address',
   'auth.passwordRequired': 'Enter your password',
 
@@ -49,7 +55,7 @@ export const en = {
 
   // Auth — register
   'auth.register.title': 'Create your account',
-  'auth.register.subtitle': 'Start speaking English today — it only takes a minute.',
+  'auth.register.subtitle': 'Start speaking today — it only takes a minute.',
   'auth.register.passwordPlaceholder': 'At least {{min}} characters',
   'auth.register.confirmPassword': 'Confirm password',
   'auth.register.confirmPlaceholder': 'Repeat your password',
@@ -65,7 +71,7 @@ export const en = {
   'auth.register.strengthStrong': 'Strong',
 
   // Splash
-  'splash.tagline': 'Your AI English tutor',
+  'splash.tagline': 'Your AI language tutor',
 
   // Bottom tab bar
   'tabBar.cards': 'Cards',
@@ -85,6 +91,10 @@ export const en = {
   'profile.settings': 'Settings',
   'profile.changeLanguageSub': 'Select your learning language',
   'profile.changeVoiceSub': 'Choose your tutor’s voice',
+  'profile.editName': 'Edit name',
+  'profile.changeNameSub': 'Your display name',
+  'profile.saveName': 'Save',
+  'profile.nameFallback': 'Set your name',
   'profile.noBadges': 'No badges yet — start a lesson to earn your first.',
   // Streak hints (only shown when the underlying number is real)
   'profile.streakKeepGoing': 'Keep it up! 🔥',
@@ -190,12 +200,14 @@ export const en = {
   'flashcards.header': 'Flashcards',
   'flashcards.headerSub': 'Spaced repetition keeps it fresh',
   'flashcards.allCards': 'All cards',
+  'flashcards.studyNow': 'Study now',
   'flashcards.cardOne': '{{count}} card',
   'flashcards.cardOther': '{{count}} cards',
   'flashcards.dueNow': '{{count}} due now',
   'flashcards.planetDeck': 'Planet {{number}} · {{title}}',
+  // Names the rating buttons verbatim ('flashcards.ratingHard'/'ratingEasy').
   'flashcards.tip':
-    'Cards marked Hard come back sooner. Easy cards are tested again later to confirm you really know them.',
+    'Cards marked Hard come back sooner. Cards marked Learned are tested again later to confirm you really know them.',
   'flashcards.loadingCards': 'Loading your cards…',
   'flashcards.emptyTitle': 'No cards here yet',
   'flashcards.emptyBody':
@@ -222,7 +234,8 @@ export const en = {
   'flashcards.learned': 'Learned',
   'flashcards.retention': 'Your retention',
   'flashcards.nextReview': 'Next review',
-  'flashcards.nextReviewIn': 'in {{days}} days',
+  'flashcards.nextReviewInOne': 'in {{days}} day',
+  'flashcards.nextReviewInOther': 'in {{days}} days',
   'flashcards.rememberPhrase': 'Remember the phrase',
   'flashcards.ratingForgot': "Didn't know",
   'flashcards.axisToday': 'Today',
@@ -234,8 +247,9 @@ export const en = {
   'flashcards.axisPlus30': '+30d',
 
   // Planets
-  'planets.audioModeEnglishOnly': 'English only',
-  'planets.audioModeEnglishPause': 'English + pause',
+  // Named for the target language, not English — the course language varies.
+  'planets.audioModeLanguageOnly': 'Language only',
+  'planets.audioModeLanguagePause': 'Language + pause',
   'planets.audioModeRandom': 'Random order',
   'planets.audioModeHardReview': 'Hard review',
   'planets.tapToListen': 'Tap play to listen',
@@ -292,12 +306,29 @@ export const en = {
   'voicePicker.speaks': 'Speaks {{language}}',
   'voicePicker.play': 'Play',
   'voicePicker.playing': 'Playing…',
+  'voicePicker.playFailed': 'No sound — retry',
   'voicePicker.previewNote': 'Preview plays a greeting in {{language}}',
   'voicePicker.done': 'Done',
 
+  // Achievements (the 100-achievement catalog behind the Profile badges).
+  // Achievement titles and descriptions themselves come from the database.
+  'achievements.title': 'Achievements',
+  'achievements.earnedOf': '{{earned}} of {{total}}',
+  'achievements.xpReward': '+{{xp}} XP',
+  'achievements.showEarned': 'Show earned only',
+  'achievements.showAll': 'Show all',
+  'achievements.catLessons': 'Lessons',
+  'achievements.catPlanets': 'Planets',
+  'achievements.catSentences': 'Sentences',
+  'achievements.catCards': 'Flashcards',
+  'achievements.catConversation': 'Conversation',
+  'achievements.catCorrections': 'Corrections',
+  'achievements.catStreak': 'Streaks',
+  'achievements.catXp': 'Experience',
+
   // Course overview (pre-login) — every figure comes from /api/planets/catalog
   'course.title': 'What you will learn',
-  'course.eyebrow': 'THE HUPY METHOD',
+  'course.eyebrow': 'THE HUPPY METHOD',
   'course.body':
     'Every phrase is practiced out loud with your tutor, corrected in the moment, and brought back for review right before you would forget it.',
   'course.cta': 'Start learning',
@@ -315,13 +346,13 @@ export const en = {
 
   // Mic / voice-recognition permission modal
   'permissionModal.title': 'Your turn to speak!',
-  'permissionModal.body': 'Turn on the Microphone and Speech Recognition so Hupy can correct your pronunciation.',
+  'permissionModal.body': 'Turn on the Microphone and Speech Recognition so Huppy can correct your pronunciation.',
   'permissionModal.unlockMic': 'Enable microphone',
   'permissionModal.unlockSpeech': 'Enable speech recognition',
 
   // Voice (useVoiceConversation.ts)
   'voice.micPermissionTitle': 'Microphone access',
-  'voice.micPermissionMessage': 'Huppy needs the microphone so you can practice speaking English.',
+  'voice.micPermissionMessage': 'Huppy needs the microphone so you can practice speaking.',
   'voice.micPermissionAllow': 'Allow',
   'voice.micPermissionDeny': 'Deny',
   'voice.micFailedToStart': 'Microphone failed to start. Check permissions.',

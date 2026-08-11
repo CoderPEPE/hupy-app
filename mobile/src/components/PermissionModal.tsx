@@ -24,7 +24,7 @@ export function PermissionModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onDismiss}>
       <View style={styles.scrim}>
         <View style={styles.card}>
-          <Pressable style={styles.closeBtn} onPress={onDismiss} hitSlop={8} accessibilityLabel="Close">
+          <Pressable style={styles.closeBtn} onPress={onDismiss} hitSlop={8} accessibilityLabel={t('common.close')}>
             <X size={16} color={colors.textMuted} />
           </Pressable>
 

@@ -15,11 +15,18 @@ use uuid::Uuid;
 // Planets & counts
 // ---------------------------------------------------------------------------
 
-/// Every planet of one course (`language`: 'en' | 'es' | 'pt'), in path order.
-pub async fn list_for_language(pool: &DbPool, language: &str) -> Result<Vec<Planet>> {
-    let language = language.to_string();
+/// Every planet of one course, in path order. A course is the ordered pair
+/// (base_language, language): the same Mercury..Neptune path exists for each
+/// base→target combination, so filtering must use both.
+pub async fn list_for_course(
+    pool: &DbPool,
+    base_language: &str,
+    language: &str,
+) -> Result<Vec<Planet>> {
+    let (base_language, language) = (base_language.to_string(), language.to_string());
     run_db(pool, move |conn| {
         Ok(planets::table
+            .filter(planets::base_language.eq(&base_language))
             .filter(planets::language.eq(&language))
             .order(planets::number.asc())
             .load(conn)?)
@@ -35,18 +42,20 @@ pub async fn find(pool: &DbPool, planet_id: Uuid) -> Result<Option<Planet>> {
 }
 
 /// The planet immediately before `number` in the same course (the
-/// highest-numbered planet below it, within `language`), if any — used to
-/// compute lock/unlock state. Without the language filter the three parallel
-/// courses would see each other's planets as their predecessors.
+/// highest-numbered planet below it, within the same base→target pair), if
+/// any — used to compute lock/unlock state. Without the pair filter the six
+/// parallel courses would see each other's planets as their predecessors.
 pub async fn previous_planet(
     pool: &DbPool,
     number: i32,
+    base_language: &str,
     language: &str,
 ) -> Result<Option<Planet>> {
-    let language = language.to_string();
+    let (base_language, language) = (base_language.to_string(), language.to_string());
     run_db(pool, move |conn| {
         Ok(planets::table
             .filter(planets::number.lt(number))
+            .filter(planets::base_language.eq(&base_language))
             .filter(planets::language.eq(&language))
             .order(planets::number.desc())
             .first(conn)
@@ -58,20 +67,27 @@ pub async fn previous_planet(
 /// Real counts of what one course contains: (planets, sentences, lessons).
 /// The pre-login screens quote these figures, so they must reflect the
 /// course being promoted, not all three courses at once.
-pub async fn catalog_counts(pool: &DbPool, language: &str) -> Result<(i64, i64, i64)> {
-    let language = language.to_string();
+pub async fn catalog_counts(
+    pool: &DbPool,
+    base_language: &str,
+    language: &str,
+) -> Result<(i64, i64, i64)> {
+    let (base_language, language) = (base_language.to_string(), language.to_string());
     run_db(pool, move |conn| {
         let planets_count: i64 = planets::table
+            .filter(planets::base_language.eq(&base_language))
             .filter(planets::language.eq(&language))
             .count()
             .get_result(conn)?;
         let sentences: i64 = planet_sentences::table
             .inner_join(planets::table.on(planets::id.eq(planet_sentences::planet_id)))
+            .filter(planets::base_language.eq(&base_language))
             .filter(planets::language.eq(&language))
             .count()
             .get_result(conn)?;
         let lessons: i64 = planet_lessons::table
             .inner_join(planets::table.on(planets::id.eq(planet_lessons::planet_id)))
+            .filter(planets::base_language.eq(&base_language))
             .filter(planets::language.eq(&language))
             .count()
             .get_result(conn)?;
@@ -355,9 +371,10 @@ pub async fn tutor_sentences(
     pool: &DbPool,
     user_id: Uuid,
     planet_id: Uuid,
+    base_language: &str,
     language: &str,
 ) -> Result<Vec<TutorSentence>> {
-    let language = language.to_string();
+    let (base_language, language) = (base_language.to_string(), language.to_string());
     run_db(pool, move |conn| {
         let mastered_ids: std::collections::HashSet<Uuid> = user_sentence_progress::table
             .inner_join(
@@ -372,47 +389,83 @@ pub async fn tutor_sentences(
             .into_iter()
             .collect();
 
-        // The target text lives in a different column per course (en / es /
-        // pt), with the base translation in the other slot. The struct fields
-        // are reused: `en` = target (front), `pt` = base (back).
+        // The target text lives in a different column per course, with the
+        // base translation in another slot. The struct fields are reused:
+        // `en` = target (front), `pt` = base (back). The (base, target) pair
+        // decides, so every one of the six courses reads the right columns.
         let query = planet_sentences::table
             .filter(planet_sentences::planet_id.eq(planet_id))
             .order(planet_sentences::position.asc());
-        let rows: Vec<(Uuid, String, String, String, String, String)> = match language.as_str() {
-            "es" => query
-                .clone()
-                .select((
-                    planet_sentences::id,
-                    planet_sentences::es,
-                    planet_sentences::pt,
-                    planet_sentences::subject,
-                    planet_sentences::verb,
-                    planet_sentences::complement,
-                ))
-                .load(conn)?,
-            "pt" => query
-                .clone()
-                .select((
-                    planet_sentences::id,
-                    planet_sentences::pt,
-                    planet_sentences::en,
-                    planet_sentences::subject,
-                    planet_sentences::verb,
-                    planet_sentences::complement,
-                ))
-                .load(conn)?,
-            _ => query
-                .clone()
-                .select((
-                    planet_sentences::id,
-                    planet_sentences::en,
-                    planet_sentences::pt,
-                    planet_sentences::subject,
-                    planet_sentences::verb,
-                    planet_sentences::complement,
-                ))
-                .load(conn)?,
-        };
+        let rows: Vec<(Uuid, String, String, String, String, String)> =
+            match (language.as_str(), base_language.as_str()) {
+                ("es", "pt") => query
+                    .clone()
+                    .select((
+                        planet_sentences::id,
+                        planet_sentences::es,
+                        planet_sentences::pt,
+                        planet_sentences::subject,
+                        planet_sentences::verb,
+                        planet_sentences::complement,
+                    ))
+                    .load(conn)?,
+                ("pt", "en") => query
+                    .clone()
+                    .select((
+                        planet_sentences::id,
+                        planet_sentences::pt,
+                        planet_sentences::en,
+                        planet_sentences::subject,
+                        planet_sentences::verb,
+                        planet_sentences::complement,
+                    ))
+                    .load(conn)?,
+                ("en", "es") => query
+                    .clone()
+                    .select((
+                        planet_sentences::id,
+                        planet_sentences::en,
+                        planet_sentences::es,
+                        planet_sentences::subject,
+                        planet_sentences::verb,
+                        planet_sentences::complement,
+                    ))
+                    .load(conn)?,
+                ("es", "en") => query
+                    .clone()
+                    .select((
+                        planet_sentences::id,
+                        planet_sentences::es,
+                        planet_sentences::en,
+                        planet_sentences::subject,
+                        planet_sentences::verb,
+                        planet_sentences::complement,
+                    ))
+                    .load(conn)?,
+                ("pt", "es") => query
+                    .clone()
+                    .select((
+                        planet_sentences::id,
+                        planet_sentences::pt,
+                        planet_sentences::es,
+                        planet_sentences::subject,
+                        planet_sentences::verb,
+                        planet_sentences::complement,
+                    ))
+                    .load(conn)?,
+                // ("en", "pt") and any legacy fallback
+                _ => query
+                    .clone()
+                    .select((
+                        planet_sentences::id,
+                        planet_sentences::en,
+                        planet_sentences::pt,
+                        planet_sentences::subject,
+                        planet_sentences::verb,
+                        planet_sentences::complement,
+                    ))
+                    .load(conn)?,
+            };
 
         Ok(rows
             .into_iter()
@@ -438,9 +491,10 @@ pub async fn cumulative_review_sample(
     user_id: Uuid,
     before_planet_number: i32,
     limit: i64,
+    base_language: &str,
     language: &str,
 ) -> Result<Vec<(String, String)>> {
-    let language = language.to_string();
+    let (base_language, language) = (base_language.to_string(), language.to_string());
     run_db(pool, move |conn| {
         let query = user_sentence_progress::table
             .inner_join(
@@ -451,23 +505,38 @@ pub async fn cumulative_review_sample(
             .filter(user_sentence_progress::user_id.eq(user_id))
             .filter(user_sentence_progress::mastered.eq(true))
             .filter(planets::number.lt(before_planet_number))
+            .filter(planets::base_language.eq(&base_language))
             .filter(planets::language.eq(&language))
             .order(planets::number.desc())
             .limit(limit);
-        let rows: Vec<(String, String)> = match language.as_str() {
-            "es" => query
-                .clone()
-                .select((planet_sentences::es, planet_sentences::pt))
-                .load(conn)?,
-            "pt" => query
-                .clone()
-                .select((planet_sentences::pt, planet_sentences::en))
-                .load(conn)?,
-            _ => query
-                .clone()
-                .select((planet_sentences::en, planet_sentences::pt))
-                .load(conn)?,
-        };
+        let rows: Vec<(String, String)> =
+            match (language.as_str(), base_language.as_str()) {
+                ("es", "pt") => query
+                    .clone()
+                    .select((planet_sentences::es, planet_sentences::pt))
+                    .load(conn)?,
+                ("pt", "en") => query
+                    .clone()
+                    .select((planet_sentences::pt, planet_sentences::en))
+                    .load(conn)?,
+                ("en", "es") => query
+                    .clone()
+                    .select((planet_sentences::en, planet_sentences::es))
+                    .load(conn)?,
+                ("es", "en") => query
+                    .clone()
+                    .select((planet_sentences::es, planet_sentences::en))
+                    .load(conn)?,
+                ("pt", "es") => query
+                    .clone()
+                    .select((planet_sentences::pt, planet_sentences::es))
+                    .load(conn)?,
+                // ("en", "pt") and any legacy fallback
+                _ => query
+                    .clone()
+                    .select((planet_sentences::en, planet_sentences::pt))
+                    .load(conn)?,
+            };
         Ok(rows)
     })
     .await

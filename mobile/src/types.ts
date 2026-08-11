@@ -2,7 +2,12 @@ export type User = {
   id: string;
   email: string;
   created_at: string;
-  /** The learner's course: 'en' | 'es' | 'pt'. */
+  /** The learner's real name (set at registration); empty means screens
+   * fall back to the email-derived name. */
+  name: string;
+  /** The learner's own language (how the tutor explains): 'en' | 'es' | 'pt'. */
+  base_language: string;
+  /** The language being learned: 'en' | 'es' | 'pt'. */
   language: string;
   /** Chosen tutor voice (OpenAI voice id); empty = the course default. */
   voice: string;
@@ -32,8 +37,10 @@ export type Planet = {
   color: string;
   topics: string[];
   created_at: string;
-  /** The course this planet belongs to: 'en' | 'es' | 'pt'. Sentence `en`
-   * fields hold the target language, `pt` the base translation. */
+  /** The explanation language of this course: 'en' | 'es' | 'pt'. */
+  base_language: 'en' | 'es' | 'pt';
+  /** The taught (target) language: 'en' | 'es' | 'pt'. Sentence `en`
+   * fields hold the target text, `pt` the base translation. */
   language: 'en' | 'es' | 'pt';
   status: PlanetStatus;
   /** 0..1 — how close this planet is to being unlocked (previous planet mastery). */

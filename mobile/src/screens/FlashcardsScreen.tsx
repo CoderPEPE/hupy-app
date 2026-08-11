@@ -1,10 +1,10 @@
-import { BookOpen, Calendar, CheckCircle2, ChevronLeft, Layers, RefreshCw, RotateCcw, Star, Volume2, Loader2 } from 'lucide-react-native';
+import { BookOpen, Calendar, CheckCircle2, ChevronRight, Layers, RefreshCw, RotateCcw, Star, Volume2, Loader2 } from 'lucide-react-native';
 
 function CheckCircle2Icon() {
   return <CheckCircle2 size={32} color={colors.success} />;
 }
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle as SvgCircle, Path as SvgPath } from 'react-native-svg';
 import { AppTabBar } from '../components/AppTabBar';
 import { ProgressBar } from '../components/ProgressBar';
@@ -12,6 +12,7 @@ import { Card, IconButton, ScreenHeader } from '../components/ui';
 import { StreakXpBar } from '../components/StreakXpBar';
 import { useFlashcards, usePlanets, useReviewFlashcard } from '../api/hooks';
 import { localeTag, plural, useI18nStore, useT, type TranslationKey } from '../i18n';
+import { planetOrbSource } from '../planets/planetLevels';
 import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing, typography } from '../theme';
@@ -139,7 +140,9 @@ function NextReviewBadge({ card }: { card: Flashcard }) {
       <Text style={styles.nextReviewLabel}>{t('flashcards.nextReview')}</Text>
       <Calendar size={20} color={colors.primary} />
       <Text style={styles.nextReviewDate}>{date.toUpperCase()}</Text>
-      <Text style={styles.nextReviewIn}>{t('flashcards.nextReviewIn', { days })}</Text>
+      <Text style={styles.nextReviewIn}>
+        {t(plural(days, 'flashcards.nextReviewInOne', 'flashcards.nextReviewInOther'), { days })}
+      </Text>
     </View>
   );
 }
@@ -164,6 +167,7 @@ export function FlashcardsScreen() {
     (c) => (deck === 'all' || c.planet_id === deck) && (showLearned ? !c.due : c.due),
   );
   const dueCount = cards.filter((c) => (deck === 'all' || c.planet_id === deck) && c.due).length;
+  const dueTotal = cards.filter((c) => c.due).length;
   const planetName = (id: string | null) =>
     id ? planets.find((p) => p.id === id)?.title ?? t('flashcards.planetFallback') : t('flashcards.allCards');
 
@@ -211,39 +215,49 @@ export function FlashcardsScreen() {
         />
 
         <ScrollView contentContainerStyle={styles.deckList} showsVerticalScrollIndicator={false}>
-          <Card row style={styles.deckCard} onPress={() => openDeck('all')}>
-            <View style={[styles.deckIcon, { backgroundColor: colors.primarySoft }]}>
-              <Layers size={22} color={colors.primary} />
+          <Card row style={styles.heroCard} onPress={() => openDeck('all')}>
+            <View style={styles.heroIcon}>
+              <Layers size={22} color={colors.textOnPrimary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.deckName}>{t('flashcards.allCards')}</Text>
-              <Text style={styles.deckMeta}>
+              <Text style={styles.heroName}>{t('flashcards.allCards')}</Text>
+              <Text style={styles.heroMeta}>
                 {t(plural(cards.length, 'flashcards.cardOne', 'flashcards.cardOther'), { count: cards.length })} ·{' '}
-                {t('flashcards.dueNow', { count: cards.filter((c) => c.due).length })}
+                {t('flashcards.dueNow', { count: dueTotal })}
               </Text>
-              <View style={styles.deckProgress}>
+              <View style={styles.heroProgress}>
+                {/* Share already reviewed — a full bar means "nothing left today". */}
                 <ProgressBar
-                  value={cards.length ? cards.filter((c) => c.due).length / cards.length : 0}
-                  color={colors.primary}
+                  value={cards.length ? (cards.length - dueTotal) / cards.length : 0}
+                  color={colors.textOnPrimary}
+                  trackColor="rgba(255,255,255,0.25)"
+                  height={6}
                 />
               </View>
             </View>
-            <ChevronLeft size={20} color={colors.textFaint} style={{ transform: [{ rotate: '180deg' }] }} />
+            <View style={styles.studyBtn}>
+              <Text style={styles.studyBtnText}>{t('flashcards.studyNow')}</Text>
+              <ChevronRight size={16} color={colors.primary} />
+            </View>
           </Card>
 
           {planets.map((planet) => {
             const planetCards = cards.filter((c) => c.planet_id === planet.id);
             const planetDue = planetCards.filter((c) => c.due).length;
+            const orb = planetOrbSource(planet.number);
             return (
               <Card row key={planet.id} style={styles.deckCard} onPress={() => openDeck(planet.id)}>
+                {/* The planet's own art, cut out of the same level images the
+                    Planets screen shows, bleeding in from the right. */}
+                {orb ? <Image source={orb} style={styles.deckPlanet} /> : null}
                 <View style={[styles.deckIcon, { backgroundColor: `${planet.color}22` }]}>
                   <BookOpen size={22} color={planet.color} />
                 </View>
-                <View style={{ flex: 1 }}>
+                <View style={styles.deckBody}>
                   <Text style={styles.deckName}>
                     {t('flashcards.planetDeck', { number: planet.number, title: planet.title })}
                   </Text>
-                  <Text style={styles.deckMeta}>
+                  <Text style={[styles.deckMeta, !planetCards.length && styles.deckMetaEmpty]}>
                     {t(plural(planetCards.length, 'flashcards.cardOne', 'flashcards.cardOther'), {
                       count: planetCards.length,
                     })}{' '}
@@ -251,12 +265,18 @@ export function FlashcardsScreen() {
                   </Text>
                   <View style={styles.deckProgress}>
                     <ProgressBar
-                      value={planetCards.length ? planetDue / planetCards.length : 0}
+                      value={planetCards.length ? (planetCards.length - planetDue) / planetCards.length : 0}
                       color={planet.color}
+                      height={6}
                     />
                   </View>
                 </View>
-                <ChevronLeft size={20} color={colors.textFaint} style={{ transform: [{ rotate: '180deg' }] }} />
+                {planetDue > 0 && (
+                  <View style={[styles.duePill, { backgroundColor: planet.color }]}>
+                    <Text style={styles.duePillText}>{planetDue}</Text>
+                  </View>
+                )}
+                <ChevronRight size={20} color={colors.textFaint} />
               </Card>
             );
           })}
@@ -477,11 +497,66 @@ const styles = StyleSheet.create({
   },
   deckList: {
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xl,
+    // Clears the floating tab bar — the last deck was landing underneath it.
+    paddingBottom: 120,
     paddingTop: spacing.sm,
+  },
+  heroCard: {
+    marginBottom: spacing.md,
+    backgroundColor: colors.primary,
+    borderColor: 'transparent',
+  },
+  heroIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  heroName: {
+    ...typography.section,
+    color: colors.textOnPrimary,
+  },
+  heroMeta: {
+    ...typography.caption,
+    marginTop: 2,
+    color: 'rgba(255,255,255,0.85)',
+  },
+  heroProgress: {
+    marginTop: 8,
+    marginRight: spacing.sm,
+  },
+  studyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.textOnPrimary,
+    borderRadius: radius.round,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  studyBtnText: {
+    ...typography.label,
+    color: colors.primary,
   },
   deckCard: {
     marginBottom: spacing.sm,
+    overflow: 'hidden',
+  },
+  duePill: {
+    minWidth: 24,
+    height: 24,
+    paddingHorizontal: 7,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  duePillText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.textOnPrimary,
   },
   deckIcon: {
     width: 48,
@@ -491,6 +566,22 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: spacing.sm,
   },
+  deckPlanet: {
+    position: 'absolute',
+    right: 4,
+    // Taller than the row, so it bleeds past the card's top and bottom.
+    top: -14,
+    width: 104,
+    height: 104,
+    // A watermark, not a subject: the row's text has to stay the loudest
+    // thing in it.
+    opacity: 0.3,
+  },
+  deckBody: {
+    flex: 1,
+    // Long titles wrap before they reach the planet.
+    paddingRight: 56,
+  },
   deckName: {
     ...typography.section,
     color: colors.text,
@@ -499,6 +590,9 @@ const styles = StyleSheet.create({
     ...typography.caption,
     marginTop: 2,
     color: colors.textMuted,
+  },
+  deckMetaEmpty: {
+    color: colors.textFaint,
   },
   deckProgress: {
     marginTop: 6,

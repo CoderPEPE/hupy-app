@@ -11,6 +11,24 @@ diesel::table! {
         description -> Varchar,
         #[max_length = 32]
         icon -> Varchar,
+        #[max_length = 32]
+        metric -> Varchar,
+        threshold -> Int4,
+        scope -> Nullable<Int4>,
+        #[max_length = 24]
+        category -> Varchar,
+        #[max_length = 12]
+        tier -> Varchar,
+        xp_reward -> Int4,
+        sort_order -> Int4,
+        #[max_length = 255]
+        title_pt -> Varchar,
+        #[max_length = 512]
+        description_pt -> Varchar,
+        #[max_length = 255]
+        title_es -> Varchar,
+        #[max_length = 512]
+        description_es -> Varchar,
     }
 }
 
@@ -165,6 +183,8 @@ diesel::table! {
         created_at -> Timestamptz,
         #[max_length = 8]
         language -> Varchar,
+        #[max_length = 8]
+        base_language -> Varchar,
     }
 }
 
@@ -180,6 +200,18 @@ diesel::table! {
         speed -> Float8,
         audio -> Bytea,
         created_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    tutor_voices (id) {
+        #[max_length = 32]
+        id -> Varchar,
+        #[max_length = 64]
+        name -> Varchar,
+        #[max_length = 8]
+        gender -> Varchar,
+        pitch_hz -> Int4,
     }
 }
 
@@ -236,6 +268,10 @@ diesel::table! {
         language -> Varchar,
         #[max_length = 64]
         voice -> Varchar,
+        #[max_length = 8]
+        base_language -> Varchar,
+        #[max_length = 120]
+        name -> Varchar,
     }
 }
 
@@ -271,6 +307,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     planet_sentences,
     planets,
     tts_audio,
+    tutor_voices,
     user_badges,
     user_planet_progress,
     user_sentence_progress,

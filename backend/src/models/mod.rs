@@ -10,9 +10,11 @@ pub mod flashcard;
 pub mod gamification;
 pub mod planet;
 pub mod user;
+pub mod voice;
 
 pub use conversation::{Conversation, Correction, Message, NewCorrection, NewMessage};
 pub use flashcard::{Card, NewCard};
 pub use gamification::UserStats;
 pub use planet::{ActivePlanet, LessonStep, Planet, PlanetProgress, Sentence, TutorSentence};
 pub use user::{NewUser, User};
+pub use voice::TutorVoice;

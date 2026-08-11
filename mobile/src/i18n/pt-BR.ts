@@ -9,6 +9,8 @@ export const ptBR: Translations = {
   // Common
   'common.somethingWrong': 'Algo deu errado',
   'common.tryAgain': 'Tentar novamente',
+  'common.back': 'Voltar',
+  'common.close': 'Fechar',
 
   // Language switcher (language names stay in their own language)
   'language.change': 'Mudar idioma',
@@ -27,6 +29,9 @@ export const ptBR: Translations = {
   'auth.password': 'Senha',
   'auth.showPassword': 'Mostrar senha',
   'auth.hidePassword': 'Ocultar senha',
+  'auth.name': 'Nome',
+  'auth.namePlaceholder': 'Como devemos te chamar?',
+  'auth.nameRequired': 'Digite seu nome',
   'auth.emailInvalid': 'Digite um e-mail válido',
   'auth.passwordRequired': 'Digite sua senha',
 
@@ -51,7 +56,7 @@ export const ptBR: Translations = {
 
   // Auth — register
   'auth.register.title': 'Crie sua conta',
-  'auth.register.subtitle': 'Comece a falar inglês hoje — leva só um minuto.',
+  'auth.register.subtitle': 'Comece a falar hoje — leva só um minuto.',
   'auth.register.passwordPlaceholder': 'Pelo menos {{min}} caracteres',
   'auth.register.confirmPassword': 'Confirmar senha',
   'auth.register.confirmPlaceholder': 'Repita sua senha',
@@ -67,7 +72,7 @@ export const ptBR: Translations = {
   'auth.register.strengthStrong': 'Forte',
 
   // Splash
-  'splash.tagline': 'Seu tutor de inglês com IA',
+  'splash.tagline': 'Seu tutor de idiomas com IA',
 
   // Bottom tab bar
   'tabBar.cards': 'Cartões',
@@ -87,6 +92,10 @@ export const ptBR: Translations = {
   'profile.settings': 'Configurações',
   'profile.changeLanguageSub': 'Escolha seu idioma de estudo',
   'profile.changeVoiceSub': 'Escolha a voz do seu tutor',
+  'profile.editName': 'Editar nome',
+  'profile.changeNameSub': 'Seu nome de exibição',
+  'profile.saveName': 'Salvar',
+  'profile.nameFallback': 'Defina seu nome',
   'profile.noBadges': 'Nenhuma conquista ainda — comece uma aula para ganhar a primeira.',
   // Streak hints (only shown when the underlying number is real)
   'profile.streakKeepGoing': 'Continue assim! 🔥',
@@ -189,12 +198,13 @@ export const ptBR: Translations = {
   'flashcards.header': 'Cartões',
   'flashcards.headerSub': 'A repetição espaçada mantém tudo fresco',
   'flashcards.allCards': 'Todos os cartões',
+  'flashcards.studyNow': 'Estudar agora',
   'flashcards.cardOne': '{{count}} cartão',
   'flashcards.cardOther': '{{count}} cartões',
   'flashcards.dueNow': '{{count}} para revisar agora',
   'flashcards.planetDeck': 'Planeta {{number}} · {{title}}',
   'flashcards.tip':
-    'Cartões marcados como Difícil voltam mais cedo. Cartões marcados como Fácil são testados de novo mais tarde para confirmar que você realmente sabe.',
+    'Cartões marcados como Difícil voltam mais cedo. Cartões marcados como Aprendi são testados de novo mais tarde para confirmar que você realmente sabe.',
   'flashcards.loadingCards': 'Carregando seus cartões…',
   'flashcards.emptyTitle': 'Nenhum cartão por aqui ainda',
   'flashcards.emptyBody':
@@ -215,26 +225,28 @@ export const ptBR: Translations = {
   'flashcards.ratingMedium': 'Quase',
   'flashcards.ratingEasy': 'Aprendi',
   'flashcards.planetFallback': 'Planeta',
-  'flashcards.pendingRecheck': 'Marcado como fácil — a Huppy vai confirmar isso ao vivo',
+  'flashcards.pendingRecheck': 'Marcado como fácil — o Huppy vai confirmar isso ao vivo',
   'flashcards.structureBack': 'Estrutura',
   'flashcards.toReview': 'Revisar',
   'flashcards.learned': 'Aprendidos',
   'flashcards.retention': 'Sua retenção',
   'flashcards.nextReview': 'Próxima revisão',
-  'flashcards.nextReviewIn': 'em {{days}} dias',
+  'flashcards.nextReviewInOne': 'em {{days}} dia',
+  'flashcards.nextReviewInOther': 'em {{days}} dias',
   'flashcards.rememberPhrase': 'Lembre-se da frase',
   'flashcards.ratingForgot': 'Não lembrei',
   'flashcards.axisToday': 'Hoje',
-  'flashcards.axisPlus1': '+1dia',
-  'flashcards.axisPlus3': '+3dias',
-  'flashcards.axisPlus5': '+5dias',
-  'flashcards.axisPlus7': '+7dias',
-  'flashcards.axisPlus14': '+14dias',
-  'flashcards.axisPlus30': '+30dias',
+  // Compact chart-axis ticks — "d" for "dia", so they fit like en/es.
+  'flashcards.axisPlus1': '+1d',
+  'flashcards.axisPlus3': '+3d',
+  'flashcards.axisPlus5': '+5d',
+  'flashcards.axisPlus7': '+7d',
+  'flashcards.axisPlus14': '+14d',
+  'flashcards.axisPlus30': '+30d',
 
   // Planets
-  'planets.audioModeEnglishOnly': 'Só inglês',
-  'planets.audioModeEnglishPause': 'Inglês + pausa',
+  'planets.audioModeLanguageOnly': 'Só o idioma',
+  'planets.audioModeLanguagePause': 'Idioma + pausa',
   'planets.audioModeRandom': 'Ordem aleatória',
   'planets.audioModeHardReview': 'Revisão difícil',
   'planets.tapToListen': 'Toque em play para ouvir',
@@ -270,11 +282,11 @@ export const ptBR: Translations = {
 
   // Chapter intro (shown before a lesson starts)
   'chapterIntro.chapter': 'Capítulo {{position}}',
-  'chapterIntro.lessonsLeftOne': '{{count}} lição para o próximo capítulo',
-  'chapterIntro.lessonsLeftOther': '{{count}} lições para o próximo capítulo',
-  'chapterIntro.start': 'Começar a Primeira Lição',
-  'chapterIntro.myWords': 'Minhas Palavras',
-  'chapterIntro.livePractice': 'Prática ao Vivo',
+  'chapterIntro.lessonsLeftOne': '{{count}} aula para o próximo capítulo',
+  'chapterIntro.lessonsLeftOther': '{{count}} aulas para o próximo capítulo',
+  'chapterIntro.start': 'Começar a aula',
+  'chapterIntro.myWords': 'Minhas palavras',
+  'chapterIntro.livePractice': 'Prática ao vivo',
 
   // Language picker
   'languagePicker.title': 'Escolha seu idioma',
@@ -289,14 +301,30 @@ export const ptBR: Translations = {
   'voicePicker.female': 'Vozes femininas',
   'voicePicker.male': 'Vozes masculinas',
   'voicePicker.speaks': 'Fala {{language}}',
-  'voicePicker.play': 'Ouvir',
-  'voicePicker.playing': 'Tocando…',
+  'voicePicker.play': 'Reproduzir',
+  'voicePicker.playing': 'Reproduzindo…',
+  'voicePicker.playFailed': 'Sem som — tentar de novo',
   'voicePicker.previewNote': 'A prévia fala uma saudação em {{language}}',
   'voicePicker.done': 'Pronto',
 
+  // Achievements
+  'achievements.title': 'Conquistas',
+  'achievements.earnedOf': '{{earned}} de {{total}}',
+  'achievements.xpReward': '+{{xp}} XP',
+  'achievements.showEarned': 'Só as conquistadas',
+  'achievements.showAll': 'Ver todas',
+  'achievements.catLessons': 'Aulas',
+  'achievements.catPlanets': 'Planetas',
+  'achievements.catSentences': 'Frases',
+  'achievements.catCards': 'Cartões',
+  'achievements.catConversation': 'Conversa',
+  'achievements.catCorrections': 'Correções',
+  'achievements.catStreak': 'Sequências',
+  'achievements.catXp': 'Experiência',
+
   // Course overview (pre-login) — every figure comes from /api/planets/catalog
   'course.title': 'O que você vai aprender',
-  'course.eyebrow': 'O MÉTODO HUPY',
+  'course.eyebrow': 'O MÉTODO HUPPY',
   'course.body':
     'Cada frase é praticada em voz alta com seu tutor, corrigida na hora e revisada pouco antes de você esquecer.',
   'course.cta': 'Começar a aprender',
@@ -314,13 +342,13 @@ export const ptBR: Translations = {
 
   // Mic / voice-recognition permission modal
   'permissionModal.title': 'Sua vez de falar!',
-  'permissionModal.body': 'Ative o Microfone e o Reconhecimento de Voz para a Hupy corrigir a sua pronúncia.',
-  'permissionModal.unlockMic': 'Liberar Microfone',
-  'permissionModal.unlockSpeech': 'Liberar Reconhecimento de Voz',
+  'permissionModal.body': 'Ative o Microfone e o Reconhecimento de Voz para o Huppy corrigir a sua pronúncia.',
+  'permissionModal.unlockMic': 'Ativar microfone',
+  'permissionModal.unlockSpeech': 'Ativar reconhecimento de voz',
 
   // Voice (useVoiceConversation.ts)
   'voice.micPermissionTitle': 'Acesso ao microfone',
-  'voice.micPermissionMessage': 'O Huppy precisa do microfone para você praticar a fala em inglês.',
+  'voice.micPermissionMessage': 'O Huppy precisa do microfone para você praticar a fala.',
   'voice.micPermissionAllow': 'Permitir',
   'voice.micPermissionDeny': 'Negar',
   'voice.micFailedToStart': 'Não foi possível iniciar o microfone. Verifique as permissões.',

@@ -13,3 +13,4 @@ pub mod gamification;
 pub mod planets;
 pub mod tts;
 pub mod users;
+pub mod voices;

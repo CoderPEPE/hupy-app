@@ -10,6 +10,7 @@ import { useT } from '../i18n';
 import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing, typography } from '../theme';
+import { displayName } from '../utils/userName';
 import type { Planet } from '../types';
 
 function PlanetRow({ planet, onPress }: { planet: Planet; onPress: () => void }) {
@@ -57,7 +58,7 @@ export function PlanetsHomeScreen() {
   const { data: cards = [] } = useFlashcards();
   const { data: gamification } = useGamificationStats();
 
-  const firstName = user?.email.split('@')[0] ?? '';
+  const firstName = displayName(user);
   const initial = (firstName[0] ?? 'H').toUpperCase();
   const streak = gamification?.streak_days ?? 0;
 
