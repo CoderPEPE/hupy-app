@@ -1,0 +1,10 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    // Only jest globals are ambient-included; app types resolve via explicit
+    // imports, so adding other @types/* packages will NOT auto-apply to the
+    // app — scope new ambient types to test files explicitly if needed.
+    "types": ["jest"]
+  }
+}

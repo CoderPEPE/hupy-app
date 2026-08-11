@@ -1,0 +1,9 @@
+DROP TABLE IF EXISTS user_sentence_progress;
+DROP TABLE IF EXISTS user_planet_progress;
+DROP TABLE IF EXISTS card_reviews;
+DROP TABLE IF EXISTS flashcards;
+DROP TABLE IF EXISTS corrections;
+DROP TABLE IF EXISTS messages;
+DROP TABLE IF EXISTS conversations;
+DROP TABLE IF EXISTS planet_sentences;
+DROP TABLE IF EXISTS planets;

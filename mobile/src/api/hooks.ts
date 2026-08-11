@@ -1,0 +1,179 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  bumpPlanetProgress,
+  getPlanet,
+  getPlanetLesson,
+  getPlanets,
+  masterSentence,
+  type ProgressMetric,
+} from './planets';
+import {
+  correctionToCard,
+  createFlashcard,
+  getFlashcards,
+  reviewFlashcard,
+  type FlashcardFilters,
+} from './flashcards';
+import {
+  addConversationCorrection,
+  addConversationMessage,
+  createConversation,
+  getConversation,
+  getConversations,
+} from './conversations';
+import type { CardRating } from '../types';
+
+export const queryKeys = {
+  planets: ['planets'] as const,
+  planet: (id: string) => ['planets', id] as const,
+  lesson: (id: string) => ['planets', id, 'lesson'] as const,
+  flashcards: (filters: FlashcardFilters = {}) =>
+    ['flashcards', filters.planetId ?? 'all', filters.due ? 'due' : 'all-cards'] as const,
+  conversations: ['conversations'] as const,
+  conversation: (id: string) => ['conversations', id] as const,
+};
+
+// ---------------------------------------------------------------------------
+// Queries
+// ---------------------------------------------------------------------------
+
+export function usePlanets() {
+  return useQuery({ queryKey: queryKeys.planets, queryFn: getPlanets });
+}
+
+export function usePlanet(id: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.planet(id ?? ''),
+    queryFn: () => getPlanet(id!),
+    enabled: !!id,
+  });
+}
+
+export function useLesson(planetId: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.lesson(planetId ?? ''),
+    queryFn: () => getPlanetLesson(planetId!),
+    enabled: !!planetId,
+  });
+}
+
+export function useFlashcards(filters: FlashcardFilters = {}) {
+  return useQuery({ queryKey: queryKeys.flashcards(filters), queryFn: () => getFlashcards(filters) });
+}
+
+export function useConversations() {
+  return useQuery({ queryKey: queryKeys.conversations, queryFn: getConversations });
+}
+
+export function useConversation(id: string | null | undefined) {
+  return useQuery({
+    queryKey: queryKeys.conversation(id ?? ''),
+    queryFn: () => getConversation(id!),
+    enabled: !!id,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Mutations
+// ---------------------------------------------------------------------------
+
+export function useBumpProgress() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ planetId, metric, delta }: { planetId: string; metric: ProgressMetric; delta: number }) =>
+      bumpPlanetProgress(planetId, metric, delta),
+    onSuccess: (planet) => {
+      // Only merge into the detail cache if it was already fetched — never
+      // create a partial entry (a Planet summary without `sentences`) that
+      // could be served before the detail query ever runs.
+      const existing = qc.getQueryData(queryKeys.planet(planet.id));
+      if (existing) {
+        qc.setQueryData(queryKeys.planet(planet.id), { ...(existing as object), ...planet });
+        // Lessons' completed/locked flags derive from mastery — refresh them.
+        qc.invalidateQueries({ queryKey: queryKeys.planet(planet.id) });
+      }
+      qc.invalidateQueries({ queryKey: queryKeys.planets });
+    },
+  });
+}
+
+export function useMasterSentence() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ planetId, sentenceId, mastered }: { planetId: string; sentenceId: string; mastered: boolean }) =>
+      masterSentence(planetId, sentenceId, mastered),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.planets });
+    },
+  });
+}
+
+export function useReviewFlashcard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, rating }: { id: string; rating: CardRating }) => reviewFlashcard(id, rating),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['flashcards'] });
+    },
+  });
+}
+
+export function useCreateFlashcard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: createFlashcard,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['flashcards'] });
+    },
+  });
+}
+
+export function useCorrectionToCard() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (correctionId: string) => correctionToCard(correctionId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['flashcards'] });
+    },
+  });
+}
+
+export function useCreateConversation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: createConversation,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.conversations });
+    },
+  });
+}
+
+export function useAddMessage() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      conversationId: string;
+      role: 'user' | 'assistant';
+      text: string;
+      kind?: string;
+    }) => addConversationMessage(input.conversationId, input),
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: queryKeys.conversation(variables.conversationId) });
+      qc.invalidateQueries({ queryKey: queryKeys.conversations });
+    },
+  });
+}
+
+export function useAddCorrection() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { conversationId: string } & Parameters<typeof addConversationCorrection>[1]) => {
+      const { conversationId, ...fields } = input;
+      return addConversationCorrection(conversationId, fields);
+    },
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: queryKeys.conversation(variables.conversationId) });
+      qc.invalidateQueries({ queryKey: queryKeys.conversations });
+    },
+  });
+}
