@@ -17,6 +17,10 @@ export type ClientSecretResponse = {
   expires_at: number;
   instructions?: string;
   tools?: RealtimeTool[];
+  /** The tutor voice this session was minted with: the learner's pick, or the
+   * course default. The app must echo it back in its own `session.update`,
+   * which would otherwise override it. */
+  voice?: string;
 };
 
 export function getRealtimeClientSecret() {

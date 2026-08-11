@@ -1,4 +1,4 @@
-import { BookOpen, Calendar, CheckCircle2, ChevronRight, Layers, RefreshCw, RotateCcw, Star, Volume2, Loader2 } from 'lucide-react-native';
+import { BookOpen, Calendar, CheckCircle2, ChevronRight, Layers, RefreshCw, Star, Volume2, Loader2 } from 'lucide-react-native';
 
 function CheckCircle2Icon() {
   return <CheckCircle2 size={32} color={colors.success} />;
@@ -292,7 +292,11 @@ export function FlashcardsScreen() {
   if (isLoading) {
     return (
       <View style={styles.screen}>
-        <ScreenHeader title={deck === 'all' ? t('flashcards.allCards') : planetName(deck)} onBack={closeDeck} />
+        <ScreenHeader
+          title={deck === 'all' ? t('flashcards.allCards') : planetName(deck)}
+          onBack={closeDeck}
+          right={<StreakXpBar />}
+        />
         <View style={styles.centerState}>
           <Loader2 size={28} color={colors.textFaint} />
           <Text style={styles.centerText}>{t('flashcards.loadingCards')}</Text>
@@ -305,7 +309,11 @@ export function FlashcardsScreen() {
   if (cards.length === 0) {
     return (
       <View style={styles.screen}>
-        <ScreenHeader title={deck === 'all' ? t('flashcards.allCards') : planetName(deck)} onBack={closeDeck} />
+        <ScreenHeader
+          title={deck === 'all' ? t('flashcards.allCards') : planetName(deck)}
+          onBack={closeDeck}
+          right={<StreakXpBar />}
+        />
         <View style={styles.centerState}>
           <BookOpen size={32} color={colors.primary} />
           <Text style={styles.centerTitle}>{t('flashcards.emptyTitle')}</Text>
@@ -320,7 +328,11 @@ export function FlashcardsScreen() {
     // The deck has cards but nothing is due right now.
     return (
       <View style={styles.screen}>
-        <ScreenHeader title={deck === 'all' ? t('flashcards.allCards') : planetName(deck)} onBack={closeDeck} />
+        <ScreenHeader
+          title={deck === 'all' ? t('flashcards.allCards') : planetName(deck)}
+          onBack={closeDeck}
+          right={<StreakXpBar />}
+        />
         <View style={styles.centerState}>
           <CheckCircle2Icon />
           <Text style={styles.centerTitle}>{t('flashcards.caughtUpTitle')}</Text>
@@ -342,15 +354,16 @@ export function FlashcardsScreen() {
 
   return (
     <View style={styles.screen}>
+      {/* Where XP is actually earned — each rating grants XP server-side and
+          refetches the stats, so the synced pill (fill + floating badge) lives
+          right here. (The old next-card skip button was dropped: the rating
+          buttons already advance the card, and a two-item right side squeezed
+          the centered title on small phones — the brief forbids that.) */}
       <ScreenHeader
         variant="purple"
         title={t('flashcards.header')}
         onBack={closeDeck}
-        right={
-          <IconButton variant="plain" onPress={next} accessibilityLabel={t('flashcards.nextCard')}>
-            <RotateCcw size={18} color="#FFFFFF" />
-          </IconButton>
-        }
+        right={<StreakXpBar dark />}
       />
 
       <ScrollView style={styles.sheet} contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
@@ -402,7 +415,11 @@ export function FlashcardsScreen() {
                   <Star size={20} color={colors.textFaint} fill={favorited.has(card.id) ? colors.gold : 'none'} />
                 </Pressable>
               </View>
-              <Text style={styles.cardEnglish}>{card.en}</Text>
+              {/* numberOfLines keeps the fixed-height card from overflowing
+                  when the phrase wraps — the structure box below still fits. */}
+              <Text style={styles.cardEnglish} numberOfLines={2}>
+                {card.en}
+              </Text>
               <Pressable
                 style={[styles.speakerBtn, listening && styles.speakerBtnActive]}
                 onPress={listen}
@@ -410,6 +427,38 @@ export function FlashcardsScreen() {
               >
                 <Volume2 size={20} color={listening ? colors.textOnPrimary : colors.primary} />
               </Pressable>
+              {/* The spec's "visual division of sentence structure" belongs on
+                  the front of the card too — see it, hear it, and see how it's
+                  built in one glance. Compact rows so long complements don't
+                  push the card past its height. */}
+              {card.subject || card.verb || card.complement ? (
+                <View style={styles.structureBoxOnLight}>
+                  {card.subject ? (
+                    <View style={styles.structureRowCompact}>
+                      <Text style={[styles.structureTag, styles.structureTagSmall]}>S</Text>
+                      <Text style={styles.structureValue} numberOfLines={1}>
+                        {card.subject}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {card.verb ? (
+                    <View style={styles.structureRowCompact}>
+                      <Text style={[styles.structureTag, styles.structureTagSmall]}>V</Text>
+                      <Text style={styles.structureValue} numberOfLines={1}>
+                        {card.verb}
+                      </Text>
+                    </View>
+                  ) : null}
+                  {card.complement ? (
+                    <View style={styles.structureRowCompact}>
+                      <Text style={[styles.structureTag, styles.structureTagSmall]}>C</Text>
+                      <Text style={styles.structureValue} numberOfLines={1}>
+                        {card.complement}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
             </Animated.View>
 
             <Animated.View style={[styles.card, styles.cardBack, { transform: [{ perspective: 1000 }, { rotateY: backRotate }] }]}>
@@ -717,6 +766,32 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.14)',
     borderRadius: radius.md,
     padding: spacing.sm,
+  },
+  structureBoxOnLight: {
+    marginTop: spacing.md,
+    alignSelf: 'stretch',
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.md,
+    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+  },
+  structureRowCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 0,
+  },
+  structureTagSmall: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    fontSize: 9,
+    lineHeight: 16,
+    marginRight: 6,
+  },
+  structureValue: {
+    flex: 1,
+    fontSize: 11,
+    color: colors.text,
   },
   structureTagOnDark: {
     backgroundColor: colors.textOnPrimary,

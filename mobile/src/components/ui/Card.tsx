@@ -24,7 +24,11 @@ export function Card({ children, onPress, variant = 'card', row, style, disabled
 
   if (onPress) {
     return (
-      <Pressable onPress={onPress} disabled={disabled} style={[composed, disabled && styles.disabled]}>
+      <Pressable
+        onPress={onPress}
+        disabled={disabled}
+        style={({ pressed }) => [composed, disabled && styles.disabled, pressed && styles.pressed]}
+      >
         {children}
       </Pressable>
     );
@@ -43,5 +47,11 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.6,
+  },
+  /** Subtle tactile feedback for every tappable card — a 1.5% shrink reads as
+   * "pressed" without fighting the screen's scroll. */
+  pressed: {
+    transform: [{ scale: 0.985 }],
+    opacity: 0.92,
   },
 });

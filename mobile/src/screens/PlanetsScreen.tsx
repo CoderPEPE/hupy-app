@@ -327,6 +327,15 @@ function ProgressCard({
     },
   ];
 
+  // The brief asks for all seven indicators. These three are the tutor's
+  // qualitative judgment calls, tracked per planet in the same progress row —
+  // shown as bars rather than a 7-column strip, which would squeeze the labels.
+  const judged = [
+    { label: t('planets.statPronunciation'), value: detail?.progress.pronunciation ?? planet.progress.pronunciation },
+    { label: t('planets.statConversation'), value: detail?.progress.conversation ?? planet.progress.conversation },
+    { label: t('planets.statReview'), value: detail?.progress.review ?? planet.progress.review },
+  ];
+
   return (
     <View style={styles.progressCard}>
       <View style={styles.progressTop}>
@@ -349,6 +358,20 @@ function ProgressCard({
             {s.icon}
             <Text style={styles.statValue}>{s.value}</Text>
             <Text style={styles.statLabel}>{s.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.judgedRows}>
+        {judged.map((j) => (
+          <View key={j.label} style={styles.judgedRow}>
+            <Text style={styles.judgedLabel} numberOfLines={1}>
+              {j.label}
+            </Text>
+            <View style={styles.judgedBar}>
+              <GradientBar value={j.value} height={5} />
+            </View>
+            <Text style={styles.judgedValue}>{Math.round(j.value * 100)}%</Text>
           </View>
         ))}
       </View>
@@ -1158,6 +1181,31 @@ const styles = StyleSheet.create({
     marginTop: 1,
     fontSize: 11,
     color: SPACE_TEXT_MUTED,
+  },
+  judgedRows: {
+    marginTop: spacing.md,
+    gap: 6,
+  },
+  judgedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  judgedLabel: {
+    // Fixed share of the row so the three labels line up and the bars all
+    // start at the same x — no wrapping, no squeezed bar.
+    width: '34%',
+    fontSize: 11,
+    color: SPACE_TEXT_MUTED,
+  },
+  judgedBar: {
+    flex: 1,
+  },
+  judgedValue: {
+    width: 38,
+    textAlign: 'right',
+    fontSize: 11,
+    fontWeight: '700',
+    color: SPACE_TEXT,
   },
   lessonsHeader: {
     flexDirection: 'row',

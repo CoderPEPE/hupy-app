@@ -10,6 +10,9 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Huppy uses the microphone so you can practice speaking English with your AI tutor.",
+        "UIBackgroundModes": [
+          "audio"
+        ],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }

@@ -11,6 +11,7 @@ export const ptBR: Translations = {
   'common.tryAgain': 'Tentar novamente',
   'common.back': 'Voltar',
   'common.close': 'Fechar',
+  'common.continue': 'Continuar',
 
   // Language switcher (language names stay in their own language)
   'language.change': 'Mudar idioma',
@@ -112,7 +113,6 @@ export const ptBR: Translations = {
   'home.subtitle': 'Vamos continuar sua jornada.',
   'home.yourPlanets': 'Seus planetas',
   'home.seeAll': 'Ver tudo',
-  'home.menu': 'Menu',
 
   // Chat — header
   'chat.greeting': 'Oi, {{name}}',
@@ -260,6 +260,9 @@ export const ptBR: Translations = {
   'planets.statListening': 'Escuta',
   'planets.statFlashcards': 'Cartões',
   'planets.statMastery': 'Domínio',
+  'planets.statPronunciation': 'Pronúncia',
+  'planets.statConversation': 'Conversação',
+  'planets.statReview': 'Revisão',
   'planets.unlockProgress': 'Progresso de desbloqueio',
   'planets.yourProgress': 'Seu progresso',
   'planets.lessons': 'Aulas',
@@ -308,6 +311,11 @@ export const ptBR: Translations = {
   'voicePicker.done': 'Pronto',
 
   // Achievements
+  // Level-up celebrations — o overlay global GamificationCelebration
+  'levelUp.title': 'Subiu de nível!',
+  'levelUp.reached': 'Você alcançou o nível {{level}}',
+  'levelUp.xpToNext': '{{xp}} XP para o próximo nível',
+  'levelUp.achievement': 'Conquista desbloqueada!',
   'achievements.title': 'Conquistas',
   'achievements.earnedOf': '{{earned}} de {{total}}',
   'achievements.xpReward': '+{{xp}} XP',

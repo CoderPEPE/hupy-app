@@ -26,6 +26,11 @@ const OUTPUT_SAMPLE_RATE = 24000;
 
 class RealtimeAudioPlayer {
   private context: AudioContext | null = null;
+  /** True while a live voice conversation is open — the XP chime player uses
+   * this to stay silent during conversations (a synthetic ding mid-dialogue
+   * is odd, and it would bleed into the live microphone). Set by
+   * `useVoiceConversation` as the session opens and closes. */
+  private sessionActive = false;
   private nextStartTime = 0;
   /** Wall-clock (Date.now) time at which all queued audio has finished playing. */
   private playbackEndAt = 0;
@@ -111,6 +116,15 @@ class RealtimeAudioPlayer {
     } catch (e) {
       console.warn('[audio] playback error', e);
     }
+  }
+
+  /** Marks whether a live voice conversation is currently open. */
+  setSessionActive(active: boolean): void {
+    this.sessionActive = active;
+  }
+
+  get isSessionActive(): boolean {
+    return this.sessionActive;
   }
 
   /**

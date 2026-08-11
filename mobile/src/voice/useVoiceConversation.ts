@@ -30,7 +30,10 @@ export type ToolCallHandler = (name: string, args: Record<string, unknown>) => P
 const REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1';
 const RECORD_RATE = 48000; // supported by @siteed/audio-studio
 const TARGET_RATE = 24000; // required by the Realtime API
-const VOICE = 'coral'; // ChatGPT's default Advanced Voice — warm and conversational
+/** Last-resort voice, only used if the backend response carries none. The real
+ * voice is the learner's chosen tutor voice (or their course's default), sent
+ * back by `/realtime/client-secret` — see `startSessionVoice` below. */
+const FALLBACK_VOICE = 'coral';
 
 /**
  * Safety margin added to the actual remaining playback time after the tutor
@@ -357,6 +360,7 @@ async function ensureMicPermission(): Promise<boolean> {
           .startRecording({ ...RECORDING_CONFIG, onAudioStream: handleAudioStream })
           .catch((e) => {
             if (__DEV__) console.warn('[voice] failed to start recording', e);
+            realtimeAudioPlayer.setSessionActive(false);
             setError(t('voice.micFailedToStart'));
             setConversationStatus('error');
           });
@@ -487,6 +491,7 @@ async function ensureMicPermission(): Promise<boolean> {
 
   const stopInternal = useCallback(async () => {
     setConversationStatus('idle');
+    realtimeAudioPlayer.setSessionActive(false);
     try {
       await recorder.stopRecording();
     } catch {
@@ -536,11 +541,15 @@ async function ensureMicPermission(): Promise<boolean> {
     let secret: string;
     let instructions: string;
     let tools: RealtimeTool[];
+    // The voice the server minted the session with — the learner's chosen
+    // tutor voice, or their course's default.
+    let startSessionVoice: string;
     try {
       const res = await getRealtimeClientSecret();
       secret = res.value;
       instructions = res.instructions ?? FALLBACK_TUTOR_PROMPT;
       tools = res.tools ?? [];
+      startSessionVoice = res.voice ?? FALLBACK_VOICE;
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         // The JWT expired or was revoked — bounce to the login screen.
@@ -551,6 +560,11 @@ async function ensureMicPermission(): Promise<boolean> {
       setConversationStatus('error');
       return;
     }
+
+    // The session is now committed — mark it live so the XP chime stays
+    // silent for the whole conversation (a ding mid-dialogue would bleed
+    // into the live mic); the flag is cleared on every close path below.
+    realtimeAudioPlayer.setSessionActive(true);
 
     const ws = new WebSocket(REALTIME_URL, [
       'realtime',
@@ -576,7 +590,7 @@ async function ensureMicPermission(): Promise<boolean> {
               },
               output: {
                 format: { type: 'audio/pcm', rate: TARGET_RATE },
-                voice: VOICE,
+                voice: startSessionVoice,
               },
             },
           },
@@ -595,11 +609,13 @@ async function ensureMicPermission(): Promise<boolean> {
     };
 
     ws.onerror = () => {
+      realtimeAudioPlayer.setSessionActive(false);
       setError(t('voice.connectionLost'));
       setConversationStatus('error');
     };
 
     ws.onclose = () => {
+      realtimeAudioPlayer.setSessionActive(false);
       if (statusRef.current !== 'idle') {
         setError(t('voice.sessionEnded'));
         setConversationStatus('error');

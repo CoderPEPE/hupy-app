@@ -76,7 +76,9 @@ async fn client_secret(
             model: services::realtime::REALTIME_MODEL.into(),
             instructions: instructions.clone(),
             audio: SessionAudio {
-                output: SessionAudioOutput { voice },
+                output: SessionAudioOutput {
+                    voice: voice.clone(),
+                },
             },
             tools: tools.clone(),
         },
@@ -109,9 +111,13 @@ async fn client_secret(
     // Attach the canonical tutor instructions + tools so the app never has to
     // embed its own copy — the pedagogical method lives in one place, on the
     // server, built fresh from the learner's real progress every session.
+    // The app re-sends the session config over the WebSocket once connected,
+    // so it has to know the voice we picked here — otherwise its own default
+    // silently overrides the learner's choice for the whole conversation.
     if let Some(obj) = json.as_object_mut() {
         obj.insert("instructions".into(), Value::String(instructions));
         obj.insert("tools".into(), Value::Array(tools));
+        obj.insert("voice".into(), Value::String(voice));
     }
 
     Ok(Json(json))

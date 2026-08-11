@@ -9,12 +9,14 @@ import { colors, radius } from '../theme';
 
 type TabIcon = React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
 
+// Layout fixed by the product brief: flashcards on the left, chat in the
+// centre, planets (and their audio) on the right.
 const SIDE_TABS: { key: TabKey; icon: TabIcon; labelKey: 'tabBar.planets' | 'tabBar.lessons' | 'tabBar.cards' | 'tabBar.profile' }[] = [
-  { key: 'planets', icon: RingedPlanetIcon, labelKey: 'tabBar.planets' },
+  { key: 'flashcards', icon: Copy, labelKey: 'tabBar.cards' },
   { key: 'lessons', icon: BookOpen, labelKey: 'tabBar.lessons' },
 ];
 const RIGHT_TABS: typeof SIDE_TABS = [
-  { key: 'flashcards', icon: Copy, labelKey: 'tabBar.cards' },
+  { key: 'planets', icon: RingedPlanetIcon, labelKey: 'tabBar.planets' },
   { key: 'profile', icon: User, labelKey: 'tabBar.profile' },
 ];
 

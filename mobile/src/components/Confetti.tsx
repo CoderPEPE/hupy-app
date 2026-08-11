@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Animated, Easing, StyleSheet, View, type DimensionValue } from 'react-native';
 
 const COLORS = ['#8B7CF6', '#F472B6', '#FBBF24', '#22D3EE', '#4ADE80'];
 const PIECE_COUNT = 20;
@@ -85,12 +85,21 @@ function ConfettiPiece({ piece }: { piece: Piece }) {
  * same key re-fires nothing, so callers typically pass a counter or
  * `Date.now()`.
  */
-export function Confetti({ burstKey }: { burstKey: number }) {
+export function Confetti({
+  burstKey,
+  origin = styles.defaultOrigin,
+}: {
+  burstKey: number;
+  /** Where the burst explodes from, relative to the overlay. Defaults to the
+   * upper-middle; callers celebrating a centered element (level-up card) pass
+   * `{ top: '50%' }` so the ring radiates out of the card. */
+  origin?: { top?: DimensionValue; left?: DimensionValue };
+}) {
   if (!burstKey) return null;
   const pieces = makePieces(burstKey);
   return (
     <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-      <View style={styles.origin}>
+      <View style={[styles.origin, origin]}>
         {pieces.map((p, i) => (
           <ConfettiPiece key={`${burstKey}-${i}`} piece={p} />
         ))}
@@ -100,10 +109,12 @@ export function Confetti({ burstKey }: { burstKey: number }) {
 }
 
 const styles = StyleSheet.create({
-  origin: {
-    position: 'absolute',
+  defaultOrigin: {
     top: '30%',
     left: '50%',
+  },
+  origin: {
+    position: 'absolute',
   },
   piece: {
     position: 'absolute',

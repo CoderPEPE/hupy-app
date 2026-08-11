@@ -25,24 +25,14 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { ProfileBackdrop } from '../components/ProfileBackdrop';
 import { VoicePickerModal, currentVoiceLabel } from '../components/VoicePickerModal';
 import { Card, IconButton, ScreenHeader } from '../components/ui';
-import { languageKey, useT, type TranslationKey } from '../i18n';
+import { languageKey, useT } from '../i18n';
+import { TIER_KEYS, levelFromXp, tierForLevel } from '../gamification/levels';
 import { useAuthStore } from '../store/auth';
 import { colors, radius, shadows, spacing, typography } from '../theme';
 import { displayName } from '../utils/userName';
 
-const XP_PER_LEVEL = 100;
-
 /** How many badges the list shows before "View all". */
 const BADGE_PREVIEW_COUNT = 3;
-
-/** Names the level tiers off the real level number — no separate stored
- * "rank" exists, this is purely a label for the level the backend computed. */
-function levelTier(level: number): TranslationKey {
-  if (level >= 11) return 'profile.tierAdvanced';
-  if (level >= 6) return 'profile.tierIntermediate';
-  if (level >= 3) return 'profile.tierElementary';
-  return 'profile.tierBeginner';
-}
 
 function StatColumn({
   icon,
@@ -221,7 +211,7 @@ export function ProfileScreen() {
   // stored choice, or the course's default when none was picked yet.
   const voiceLabel = currentVoiceLabel(user?.voice ?? '', user?.language ?? 'en');
   const xp = gamification?.xp ?? 0;
-  const level = Math.floor(xp / XP_PER_LEVEL) + 1;
+  const level = levelFromXp(xp);
   const streak = gamification?.streak_days ?? 0;
   const longest = gamification?.longest_streak ?? 0;
   const badges = gamification?.badges ?? [];
@@ -277,7 +267,7 @@ export function ProfileScreen() {
               icon={<Star size={22} color={colors.gold} fill={colors.gold} />}
               value={`${level}`}
               label={t('profile.level')}
-              hint={t(levelTier(level))}
+              hint={t(TIER_KEYS[tierForLevel(level)])}
               hintColor={colors.primary}
             />
             <StatColumn

@@ -11,6 +11,7 @@ export const es: Translations = {
   'common.tryAgain': 'Intentar de nuevo',
   'common.back': 'Volver',
   'common.close': 'Cerrar',
+  'common.continue': 'Continuar',
 
   // Language switcher (language names stay in their own language)
   'language.change': 'Cambiar idioma',
@@ -112,7 +113,6 @@ export const es: Translations = {
   'home.subtitle': 'Continuemos tu viaje.',
   'home.yourPlanets': 'Tus planetas',
   'home.seeAll': 'Ver todo',
-  'home.menu': 'Menú',
 
   // Chat — header
   'chat.greeting': 'Hola, {{name}}',
@@ -259,6 +259,9 @@ export const es: Translations = {
   'planets.statListening': 'Escucha',
   'planets.statFlashcards': 'Tarjetas',
   'planets.statMastery': 'Dominio',
+  'planets.statPronunciation': 'Pronunciación',
+  'planets.statConversation': 'Conversación',
+  'planets.statReview': 'Repaso',
   'planets.unlockProgress': 'Progreso de desbloqueo',
   'planets.yourProgress': 'Tu progreso',
   'planets.lessons': 'Lecciones',
@@ -307,6 +310,11 @@ export const es: Translations = {
   'voicePicker.done': 'Listo',
 
   // Achievements
+  // Level-up celebrations — el overlay global de GamificationCelebration
+  'levelUp.title': '¡Subiste de nivel!',
+  'levelUp.reached': 'Alcanzaste el nivel {{level}}',
+  'levelUp.xpToNext': '{{xp}} XP para el siguiente nivel',
+  'levelUp.achievement': '¡Logro desbloqueado!',
   'achievements.title': 'Logros',
   'achievements.earnedOf': '{{earned}} de {{total}}',
   'achievements.xpReward': '+{{xp}} XP',

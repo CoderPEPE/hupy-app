@@ -16,4 +16,15 @@ export const StorageKeys = {
   /** Chosen tutor voice (OpenAI voice id); changed via the Profile voice
    * picker. Mirrors `user.voice` from the backend. */
   tutorVoice: 'ui.tutorVoice',
+  /** Last level the celebration layer has acknowledged. Adopting it silently
+   * on first sight means a level-up only celebrates when it actually happens
+   * during a session — never on a fresh install or re-login. */
+  lastLevel: 'gamification.lastLevel',
+  /** Codes of achievements the celebration layer has already toasted (JSON
+   * array), so an unlocked achievement never toasts twice. */
+  seenAchievements: 'gamification.seenAchievements',
+  /** Planet ids whose unlock the Planets screen has already celebrated (JSON
+   * array). Planet ids are per-course, so switching courses celebrates the
+   * new course's unlocks once each, which is the honest behavior. */
+  celebratedUnlocks: 'planets.celebratedUnlocks',
 } as const;

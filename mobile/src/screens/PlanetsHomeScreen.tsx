@@ -1,26 +1,62 @@
-import { AudioLines, BarChart4, BookOpen, ChevronRight, Flame, Lock, Menu, MessageSquare, Star } from 'lucide-react-native';
-import React from 'react';
+import { AudioLines, BarChart4, BookOpen, ChevronRight, Flame, Lock, MessageSquare, Star } from 'lucide-react-native';
+import React, { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFlashcards, useGamificationStats, usePlanets } from '../api/hooks';
 import { AppTabBar } from '../components/AppTabBar';
 import { GradientBar } from '../components/GradientBar';
 import { PlanetTile } from '../components/PlanetTile';
-import { Card, IconButton, ScreenHeader, SectionHeader } from '../components/ui';
+import { PlanetUnlockCelebration } from '../components/PlanetUnlockCelebration';
+import { Card, ScreenHeader, SectionHeader } from '../components/ui';
 import { useT } from '../i18n';
+import { storage, StorageKeys } from '../storage';
 import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing, typography } from '../theme';
 import { displayName } from '../utils/userName';
 import type { Planet } from '../types';
 
-function PlanetRow({ planet, onPress }: { planet: Planet; onPress: () => void }) {
+function readCelebratedIds(): string[] {
+  try {
+    const raw = storage.getString(StorageKeys.celebratedUnlocks);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((c): c is string => typeof c === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistCelebratedIds(ids: string[]) {
+  storage.set(StorageKeys.celebratedUnlocks, JSON.stringify(ids));
+}
+
+function PlanetRow({
+  planet,
+  onPress,
+  celebrating,
+  onCelebrationDone,
+}: {
+  planet: Planet;
+  onPress: () => void;
+  celebrating?: boolean;
+  onCelebrationDone?: () => void;
+}) {
   const t = useT();
   const locked = planet.status === 'locked';
   const mastery = Math.round((planet.progress?.mastery ?? 0) * 100);
 
   return (
     <Card row style={[styles.planetRow, locked && styles.planetRowLocked]} onPress={locked ? undefined : onPress} disabled={locked}>
-      <PlanetTile planetNumber={planet.number} color={planet.color} size={64} locked={locked} />
+      <View style={styles.tileWrap}>
+        <PlanetTile planetNumber={planet.number} color={planet.color} size={64} locked={locked} />
+        {celebrating && (
+          <PlanetUnlockCelebration
+            planetNumber={planet.number}
+            color={planet.color}
+            size={64}
+            onDone={onCelebrationDone}
+          />
+        )}
+      </View>
       <View style={{ flex: 1 }}>
         <Text style={[styles.planetTag, { color: locked ? colors.textFaint : planet.color }]}>
           {t('planets.planetTag', { number: planet.number })}
@@ -57,10 +93,26 @@ export function PlanetsHomeScreen() {
   const { data: planets = [], isLoading } = usePlanets();
   const { data: cards = [] } = useFlashcards();
   const { data: gamification } = useGamificationStats();
+  const [celebratingId, setCelebratingId] = useState<string | null>(null);
 
   const firstName = displayName(user);
   const initial = (firstName[0] ?? 'H').toUpperCase();
   const streak = gamification?.streak_days ?? 0;
+
+  // Celebrate planets that became available since the last time the list was
+  // seen. Planet ids are per-course, and a planet only ever leaves "locked"
+  // once per course — persisting the celebrated ids means the ring + orb play
+  // exactly once per unlock, whether it happened in chat or on another visit.
+  // Planet 1 is never locked in a fresh course, so only 2+ can be "new".
+  useEffect(() => {
+    if (isLoading || planets.length === 0) return;
+    const seen = readCelebratedIds();
+    const fresh = planets.filter((p) => p.number >= 2 && p.status !== 'locked' && !seen.includes(p.id));
+    if (fresh.length === 0) return;
+    persistCelebratedIds([...seen, ...fresh.map((p) => p.id)]);
+    // Celebrate the soonest available one; the rest were announced as seen.
+    setCelebratingId(fresh.sort((a, b) => a.number - b.number)[0].id);
+  }, [isLoading, planets]);
 
   const activePlanet = planets.find((p) => p.status === 'active') ?? planets[0];
   const mastery = activePlanet ? Math.round((activePlanet.progress?.mastery ?? 0) * 100) : 0;
@@ -81,11 +133,6 @@ export function PlanetsHomeScreen() {
   return (
     <View style={styles.screen}>
       <ScreenHeader
-        left={
-          <IconButton variant="plain" accessibilityLabel={t('home.menu')}>
-            <Menu size={22} color={colors.text} />
-          </IconButton>
-        }
         right={
           <>
             <View style={styles.streakPill}>
@@ -147,7 +194,13 @@ export function PlanetsHomeScreen() {
 
         {!isLoading &&
           planets.map((planet) => (
-            <PlanetRow key={planet.id} planet={planet} onPress={() => openPlanet(planet.id)} />
+            <PlanetRow
+              key={planet.id}
+              planet={planet}
+              onPress={() => openPlanet(planet.id)}
+              celebrating={planet.id === celebratingId}
+              onCelebrationDone={() => setCelebratingId(null)}
+            />
           ))}
       </ScrollView>
 
@@ -271,6 +324,11 @@ const styles = StyleSheet.create({
   },
   planetRowLocked: {
     opacity: 0.9,
+  },
+  // Only a positioning anchor for the celebration overlay — the Card row's
+  // own gap already spaces the tile from the text, so no margin here.
+  tileWrap: {
+    position: 'relative',
   },
   planetTag: {
     ...typography.eyebrow,

@@ -10,6 +10,7 @@ export const en = {
   // Screen-reader labels for the shared header/close icon buttons.
   'common.back': 'Back',
   'common.close': 'Close',
+  'common.continue': 'Continue',
 
   // Language switcher
   'language.change': 'Change language',
@@ -111,7 +112,6 @@ export const en = {
   'home.subtitle': "Let's continue your journey.",
   'home.yourPlanets': 'Your planets',
   'home.seeAll': 'See all',
-  'home.menu': 'Menu',
 
   // Chat — header
   'chat.greeting': 'Hi, {{name}}',
@@ -263,6 +263,9 @@ export const en = {
   'planets.statListening': 'Listening',
   'planets.statFlashcards': 'Flashcards',
   'planets.statMastery': 'Mastery',
+  'planets.statPronunciation': 'Pronunciation',
+  'planets.statConversation': 'Conversation',
+  'planets.statReview': 'Review',
   'planets.unlockProgress': 'Unlock progress',
   'planets.yourProgress': 'Your progress',
   'planets.lessons': 'Lessons',
@@ -312,6 +315,11 @@ export const en = {
 
   // Achievements (the 100-achievement catalog behind the Profile badges).
   // Achievement titles and descriptions themselves come from the database.
+  // Level-up celebrations — the global GamificationCelebration overlay
+  'levelUp.title': 'Level up!',
+  'levelUp.reached': 'You reached Level {{level}}',
+  'levelUp.xpToNext': '{{xp}} XP to the next level',
+  'levelUp.achievement': 'Achievement unlocked!',
   'achievements.title': 'Achievements',
   'achievements.earnedOf': '{{earned}} of {{total}}',
   'achievements.xpReward': '+{{xp}} XP',

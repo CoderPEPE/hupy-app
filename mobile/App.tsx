@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ApiError } from './src/api/client';
+import { GamificationCelebration } from './src/components/GamificationCelebration';
 import { translate, useI18nStore } from './src/i18n';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { useAuthStore } from './src/store/auth';
@@ -60,6 +61,7 @@ class ErrorBoundary extends Component<BoundaryProps, BoundaryState> {
 
 export default function App() {
   const restore = useAuthStore((s) => s.restore);
+  const token = useAuthStore((s) => s.token);
 
   useEffect(() => {
     restore();
@@ -72,6 +74,10 @@ export default function App() {
           <ErrorBoundary>
             <StatusBar style="dark" />
             <RootNavigator />
+            {/* Global confetti/toasts for level-ups and new achievements —
+                mounted above the navigator, only while signed in (the stats
+                endpoint needs a JWT). */}
+            {token ? <GamificationCelebration /> : null}
           </ErrorBoundary>
         </QueryClientProvider>
       </SafeAreaProvider>

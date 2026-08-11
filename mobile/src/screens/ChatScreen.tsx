@@ -456,6 +456,26 @@ export function ChatScreen() {
     voice.start();
   };
 
+  /**
+   * Entering the Chat area opens the live session on its own — no button to
+   * press, per the product brief ("activate the microphone automatically").
+   * Switching tabs remounts this screen, so this runs once per visit; the
+   * guard keeps a deliberate stop from immediately restarting. Waits for the
+   * planet so the session is scoped to the right content from its first word.
+   */
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoStartedRef.current || !planet) return;
+    autoStartedRef.current = true;
+    // First ever visit: explain the mic before the OS prompt appears.
+    if (!storage.getBoolean(StorageKeys.micPrimerSeen)) {
+      setShowMicPrimer(true);
+      return;
+    }
+    startConversation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [planet]);
+
   const dismissMicPrimer = () => {
     storage.set(StorageKeys.micPrimerSeen, true);
     setShowMicPrimer(false);
