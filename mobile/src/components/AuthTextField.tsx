@@ -14,17 +14,20 @@ import { useT } from '../i18n';
 import { colors, radius, spacing } from '../theme';
 
 type Props = TextInputProps & {
-  label: string;
+  /** Omit for an icon-led field that carries its name in the placeholder. */
+  label?: string;
   error?: string;
   /** Adds a show/hide toggle for secure fields. */
   secure?: boolean;
+  /** Leading glyph inside the field. */
+  icon?: React.ReactNode;
 };
 
 /**
  * Auth text field with a focus ring, error shake and a show/hide toggle for
  * passwords. Styled to sit on the floating auth card.
  */
-export function AuthTextField({ label, error, secure, ...inputProps }: Props) {
+export function AuthTextField({ label, error, secure, icon, ...inputProps }: Props) {
   const t = useT();
   const [focused, setFocused] = useState(false);
   const [hidden, setHidden] = useState(secure ?? false);
@@ -48,9 +51,11 @@ export function AuthTextField({ label, error, secure, ...inputProps }: Props) {
 
   return (
     <View style={styles.wrapper}>
-      <Text style={[styles.label, focused && styles.labelFocused, showError && styles.labelError]}>
-        {label}
-      </Text>
+      {label != null && (
+        <Text style={[styles.label, focused && styles.labelFocused, showError && styles.labelError]}>
+          {label}
+        </Text>
+      )}
       <Animated.View style={{ transform: [{ translateX: shake }] }}>
         <View
           style={[
@@ -59,6 +64,7 @@ export function AuthTextField({ label, error, secure, ...inputProps }: Props) {
             showError && styles.inputShellError,
           ]}
         >
+          {icon != null && <View style={styles.icon}>{icon}</View>}
           <TextInput
             {...inputProps}
             secureTextEntry={hidden}
@@ -100,7 +106,7 @@ export function AuthTextField({ label, error, secure, ...inputProps }: Props) {
 
 const styles = StyleSheet.create({
   wrapper: {
-    marginBottom: spacing.sm,
+    marginBottom: 12,
   },
   label: {
     fontSize: 13,
@@ -118,14 +124,13 @@ const styles = StyleSheet.create({
   inputShell: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.inputBackground,
+    backgroundColor: colors.inputBackgroundFocus,
     borderRadius: radius.lg,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: colors.border,
     paddingHorizontal: 16,
   },
   inputShellFocused: {
-    backgroundColor: colors.inputBackgroundFocus,
     borderColor: colors.primary,
   },
   inputShellError: {
@@ -133,9 +138,12 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    paddingVertical: 12,
+    paddingVertical: 16,
     fontSize: 16,
     color: colors.text,
+  },
+  icon: {
+    marginRight: 12,
   },
   eye: {
     paddingLeft: 8,

@@ -1,21 +1,41 @@
-import { BookOpen, Calendar, CheckCircle2, ChevronRight, Layers, RefreshCw, Star, Volume2, Loader2 } from 'lucide-react-native';
+import {
+  BookOpen,
+  Calendar,
+  CheckCircle2,
+  ChevronRight,
+  Layers,
+  Lightbulb,
+  Loader2,
+  Mic,
+  RefreshCw,
+  Star,
+  Volume2,
+} from 'lucide-react-native';
 
 function CheckCircle2Icon() {
   return <CheckCircle2 size={32} color={colors.success} />;
 }
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle as SvgCircle, Path as SvgPath } from 'react-native-svg';
 import { AppTabBar } from '../components/AppTabBar';
 import { ProgressBar } from '../components/ProgressBar';
-import { Card, IconButton, ScreenHeader } from '../components/ui';
+import { Card, ScreenHeader } from '../components/ui';
 import { StreakXpBar } from '../components/StreakXpBar';
-import { useFlashcards, usePlanets, useReviewFlashcard } from '../api/hooks';
+import {
+  useAddCorrection,
+  useCreateConversation,
+  useCreateFlashcard,
+  useFlashcards,
+  usePlanets,
+  useReviewFlashcard,
+} from '../api/hooks';
 import { localeTag, plural, useI18nStore, useT, type TranslationKey } from '../i18n';
 import { planetOrbSource } from '../planets/planetLevels';
 import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing, typography } from '../theme';
+import { useVoiceConversation, type ToolCallHandler } from '../voice/useVoiceConversation';
 import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
 import type { CardRating, Flashcard } from '../types';
 
@@ -147,6 +167,200 @@ function NextReviewBadge({ card }: { card: Flashcard }) {
   );
 }
 
+/**
+ * Hint bottom sheet — the spec's "grammar analysis" panel. It only exists
+ * here (never on the card itself): it splits the sentence into its parts
+ * (subject / verb / complement) so the learner can rebuild it consciously.
+ */
+function HintSheet({ visible, card, onClose }: { visible: boolean; card: Flashcard; onClose: () => void }) {
+  const t = useT();
+  const parts = [
+    { tag: 'S', label: t('flashcards.partSubject'), value: card.subject },
+    { tag: 'V', label: t('flashcards.partVerb'), value: card.verb },
+    { tag: 'C', label: t('flashcards.partComplement'), value: card.complement },
+  ].filter((p) => p.value);
+
+  return (
+    <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.sheetBackdrop} onPress={onClose} accessibilityLabel={t('common.close')} />
+      <View style={styles.hintSheet}>
+        <View style={styles.hintSheetHandle} />
+        <Text style={styles.hintSheetTitle}>{t('flashcards.hintTitle')}</Text>
+        <Text style={styles.hintSheetSentence}>{card.en}</Text>
+        {parts.length > 0 ? (
+          <View style={styles.hintParts}>
+            {parts.map((p) => (
+              <View key={p.tag} style={styles.hintPartRow}>
+                <View style={styles.hintPartTag}>
+                  <Text style={styles.hintPartTagText}>{p.tag}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.hintPartLabel}>{p.label}</Text>
+                  <Text style={styles.hintPartValue}>{p.value}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.hintEmpty}>{t('flashcards.hintEmpty')}</Text>
+        )}
+        {card.explanation ? (
+          <View style={styles.hintExplanationBox}>
+            <Text style={styles.hintExplanationLabel}>{t('flashcards.hintWhy')}</Text>
+            <Text style={styles.hintExplanationText}>{card.explanation}</Text>
+          </View>
+        ) : null}
+        <Pressable style={styles.hintDoneBtn} onPress={onClose}>
+          <Text style={styles.hintDoneText}>{t('flashcards.hintDone')}</Text>
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
+
+/**
+ * Speaking practice — a live tutor session focused on repeating this exact
+ * sentence. Reuses the same realtime voice pipeline as Chat, with an
+ * instruction suffix that pins the target sentence so the tutor drills it.
+ * Corrections made here are recorded and become cards (same as Chat).
+ */
+function PracticeModal({ card, onClose }: { card: Flashcard; onClose: () => void }) {
+  const t = useT();
+  const createConversation = useCreateConversation();
+  const addCorrection = useAddCorrection();
+  const createFlashcard = useCreateFlashcard();
+  const conversationIdRef = useRef<string | null>(null);
+  const planetIdRef = useRef<string | null>(card.planet_id);
+  planetIdRef.current = card.planet_id;
+
+  /** Creates (once) the conversation this practice session persists to. */
+  const ensureConversation = async (): Promise<string | null> => {
+    if (conversationIdRef.current) return conversationIdRef.current;
+    try {
+      const conv = await createConversation.mutateAsync({
+        title: t('flashcards.practiceTitle'),
+        planetId: planetIdRef.current ?? undefined,
+      });
+      conversationIdRef.current = conv.id;
+      return conv.id;
+    } catch {
+      return null; // offline: voice still works, nothing persisted
+    }
+  };
+
+  const asString = (v: unknown) => (typeof v === 'string' ? v : '');
+  const asOptional = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined);
+
+  const onToolCall: ToolCallHandler = async (name, args) => {
+    switch (name) {
+      case 'record_correction': {
+        const convId = await ensureConversation();
+        if (!convId) return { error: 'no active conversation' };
+        const corr = await addCorrection.mutateAsync({
+          conversationId: convId,
+          said: asString(args.said),
+          corrected: asString(args.corrected),
+          explanation: asString(args.explanation_pt),
+          pt: asOptional(args.explanation_pt),
+          mistakePart: asOptional(args.mistake_part),
+          subject: asOptional(args.subject),
+          verb: asOptional(args.verb),
+          complement: asOptional(args.complement),
+        });
+        return { ok: true, correction_id: corr.id };
+      }
+      case 'create_flashcard': {
+        const fc = await createFlashcard.mutateAsync({
+          en: asString(args.en),
+          pt: asString(args.pt),
+          explanation: asOptional(args.explanation_pt),
+          subject: asOptional(args.subject),
+          verb: asOptional(args.verb),
+          complement: asOptional(args.complement),
+          planetId: planetIdRef.current ?? undefined,
+        });
+        return { ok: true, flashcard_id: fc.id };
+      }
+      default:
+        return { error: `unknown tool ${name}` };
+    }
+  };
+
+  const voice = useVoiceConversation(onToolCall, {
+    instructionsSuffix: t('flashcards.practicePrompt', { sentence: card.en }),
+  });
+
+  // The sheet mounts only while open, so starting here is enough — unmount
+  // (any close path) runs the hook's cleanup and stops the session.
+  useEffect(() => {
+    voice.start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const statusText =
+    voice.status === 'connecting'
+      ? t('chat.hint.connecting')
+      : voice.status === 'speaking'
+        ? t('chat.hint.tutorSpeaking')
+        : voice.status === 'error'
+          ? (voice.error ?? t('common.somethingWrong'))
+          : t('flashcards.practiceListening');
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={styles.practiceBackdrop} onPress={onClose} accessibilityLabel={t('common.close')} />
+      <View style={styles.practiceSheet}>
+        <View style={styles.practiceHeader}>
+          <View style={styles.practiceHeaderIcon}>
+            <Mic size={18} color={colors.textOnPrimary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.practiceTitle}>{t('flashcards.practiceTitle')}</Text>
+            <Text style={styles.practiceSubtitle}>{t('flashcards.practiceSubtitle')}</Text>
+          </View>
+          <Pressable onPress={onClose} hitSlop={8} accessibilityLabel={t('common.close')}>
+            <View style={styles.practiceClose}>
+              <Text style={styles.practiceCloseText}>✕</Text>
+            </View>
+          </Pressable>
+        </View>
+
+        <View style={styles.practiceSentenceBox}>
+          <Text style={styles.practiceSentence}>{card.en}</Text>
+        </View>
+
+        <View style={[styles.practiceStatusRow, voice.status === 'speaking' && styles.practiceStatusSpeaking]}>
+          <View style={[styles.practiceStatusDot, voice.status === 'speaking' && styles.practiceStatusDotActive]} />
+          <Text style={styles.practiceStatusText}>{statusText}</Text>
+        </View>
+
+        <View style={styles.practiceTranscript}>
+          {voice.messages.length === 0 ? (
+            <Text style={styles.practiceEmpty}>{t('flashcards.practiceEmpty')}</Text>
+          ) : (
+            voice.messages.map((m) => (
+              <View key={m.id} style={[styles.practiceBubbleRow, m.role === 'user' ? styles.practiceBubbleUser : styles.practiceBubbleTutor]}>
+                <Text style={m.role === 'user' ? styles.practiceBubbleUserText : styles.practiceBubbleTutorText}>
+                  {m.text}
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
+
+        <Pressable
+          style={[styles.practiceStopBtn, (voice.status === 'idle' || voice.status === 'error') && styles.practiceStopBtnIdle]}
+          onPress={onClose}
+        >
+          <Text style={styles.practiceStopText}>
+            {voice.status === 'idle' || voice.status === 'error' ? t('flashcards.practiceDone') : t('flashcards.practiceStop')}
+          </Text>
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
+
 export function FlashcardsScreen() {
   const t = useT();
   const { activeDeckId, openDeck, closeDeck } = useUiStore();
@@ -154,6 +368,8 @@ export function FlashcardsScreen() {
   const [flipped, setFlipped] = useState(false);
   const flip = useRef(new Animated.Value(0)).current;
   const [listening, setListening] = useState(false);
+  const [hintOpen, setHintOpen] = useState(false);
+  const [practiceOpen, setPracticeOpen] = useState(false);
   const [showLearned, setShowLearned] = useState(false);
   const [favorited, setFavorited] = useState<Set<string>>(new Set());
 
@@ -411,54 +627,62 @@ export function FlashcardsScreen() {
                 <View style={styles.cardEyebrow}>
                   <Text style={styles.cardEyebrowText}>{t('flashcards.rememberPhrase')}</Text>
                 </View>
-                <Pressable hitSlop={8} onPress={() => toggleFavorite(card.id)}>
+                <Pressable hitSlop={8} onPress={(e) => { e.stopPropagation(); toggleFavorite(card.id); }}>
                   <Star size={20} color={colors.textFaint} fill={favorited.has(card.id) ? colors.gold : 'none'} />
                 </Pressable>
               </View>
-              {/* numberOfLines keeps the fixed-height card from overflowing
-                  when the phrase wraps — the structure box below still fits. */}
+              {/* The front shows ONLY the English sentence — the translation
+                  stays hidden until "Reveal Translation" (spec: try to recall
+                  first), and grammar analysis lives only inside the Hint
+                  sheet. numberOfLines keeps the fixed-height card from
+                  overflowing when the phrase wraps. */}
               <Text style={styles.cardEnglish} numberOfLines={2}>
                 {card.en}
               </Text>
+              <View style={styles.frontActions}>
+                <Pressable
+                  style={[styles.actionBtn, listening && styles.actionBtnActive]}
+                  onPress={(e) => {
+                    // These buttons live inside the card's flip Pressable;
+                    // keep the tap from also flipping the card.
+                    e.stopPropagation();
+                    listen();
+                  }}
+                  accessibilityLabel={t('flashcards.listen')}
+                >
+                  <Volume2 size={20} color={listening ? colors.textOnPrimary : colors.primary} />
+                </Pressable>
+                <Pressable
+                  style={styles.actionBtn}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setPracticeOpen(true);
+                  }}
+                  accessibilityLabel={t('flashcards.speak')}
+                >
+                  <Mic size={20} color={colors.primary} />
+                </Pressable>
+                <Pressable
+                  style={styles.actionBtn}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    setHintOpen(true);
+                  }}
+                  accessibilityLabel={t('flashcards.hint')}
+                >
+                  <Lightbulb size={20} color={colors.primary} />
+                </Pressable>
+              </View>
               <Pressable
-                style={[styles.speakerBtn, listening && styles.speakerBtnActive]}
-                onPress={listen}
-                accessibilityLabel={t('flashcards.listen')}
+                style={styles.revealBtn}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  setFlipped(true);
+                }}
+                accessibilityLabel={t('flashcards.revealTranslation')}
               >
-                <Volume2 size={20} color={listening ? colors.textOnPrimary : colors.primary} />
+                <Text style={styles.revealBtnText}>{t('flashcards.revealTranslation')}</Text>
               </Pressable>
-              {/* The spec's "visual division of sentence structure" belongs on
-                  the front of the card too — see it, hear it, and see how it's
-                  built in one glance. Compact rows so long complements don't
-                  push the card past its height. */}
-              {card.subject || card.verb || card.complement ? (
-                <View style={styles.structureBoxOnLight}>
-                  {card.subject ? (
-                    <View style={styles.structureRowCompact}>
-                      <Text style={[styles.structureTag, styles.structureTagSmall]}>S</Text>
-                      <Text style={styles.structureValue} numberOfLines={1}>
-                        {card.subject}
-                      </Text>
-                    </View>
-                  ) : null}
-                  {card.verb ? (
-                    <View style={styles.structureRowCompact}>
-                      <Text style={[styles.structureTag, styles.structureTagSmall]}>V</Text>
-                      <Text style={styles.structureValue} numberOfLines={1}>
-                        {card.verb}
-                      </Text>
-                    </View>
-                  ) : null}
-                  {card.complement ? (
-                    <View style={styles.structureRowCompact}>
-                      <Text style={[styles.structureTag, styles.structureTagSmall]}>C</Text>
-                      <Text style={styles.structureValue} numberOfLines={1}>
-                        {card.complement}
-                      </Text>
-                    </View>
-                  ) : null}
-                </View>
-              ) : null}
             </Animated.View>
 
             <Animated.View style={[styles.card, styles.cardBack, { transform: [{ perspective: 1000 }, { rotateY: backRotate }] }]}>
@@ -466,29 +690,13 @@ export function FlashcardsScreen() {
               <Text style={styles.cardEnglish}>{card.en}</Text>
               <Text style={styles.cardPt}>{card.pt}</Text>
               <Text style={styles.cardExplanation}>{card.explanation}</Text>
-              {card.subject || card.verb || card.complement ? (
-                <View style={styles.structureBoxOnDark}>
-                  {card.subject ? (
-                    <View style={styles.structureRow}>
-                      <Text style={[styles.structureTag, styles.structureTagOnDark]}>S</Text>
-                      <Text style={styles.structureValueOnDark}>{card.subject}</Text>
-                    </View>
-                  ) : null}
-                  {card.verb ? (
-                    <View style={styles.structureRow}>
-                      <Text style={[styles.structureTag, styles.structureTagOnDark]}>V</Text>
-                      <Text style={styles.structureValueOnDark}>{card.verb}</Text>
-                    </View>
-                  ) : null}
-                  {card.complement ? (
-                    <View style={styles.structureRow}>
-                      <Text style={[styles.structureTag, styles.structureTagOnDark]}>C</Text>
-                      <Text style={styles.structureValueOnDark}>{card.complement}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              ) : null}
-              <Text style={styles.flipHint}>{t('flashcards.tapToFlipBack')}</Text>
+              <Pressable
+                style={styles.backActionBtn}
+                onPress={() => setFlipped(false)}
+                accessibilityLabel={t('flashcards.tapToFlipBack')}
+              >
+                <Text style={styles.backActionText}>{t('flashcards.hideTranslation')}</Text>
+              </Pressable>
             </Animated.View>
           </Pressable>
         </View>
@@ -498,6 +706,11 @@ export function FlashcardsScreen() {
       </ScrollView>
 
       <AppTabBar />
+      <HintSheet visible={hintOpen} card={card} onClose={() => setHintOpen(false)} />
+      {/* Mounted only while open: unmounting runs the voice hook's cleanup,
+          which tears down the realtime session — so every close path (stop
+          button, backdrop, ✕) leaves the mic and socket stopped. */}
+      {practiceOpen && <PracticeModal card={card} onClose={() => setPracticeOpen(false)} />}
     </View>
   );
 }
@@ -655,7 +868,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   cardArea: {
-    height: 230,
+    height: 258,
     marginBottom: spacing.lg,
   },
   cardPressable: {
@@ -717,6 +930,53 @@ const styles = StyleSheet.create({
     color: colors.text,
     textAlign: 'center',
   },
+  // Front-of-card actions: hear, speak, hint — the spec's four buttons with
+  // "Reveal Translation" as the primary action below.
+  frontActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  actionBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionBtnActive: {
+    backgroundColor: colors.primary,
+  },
+  revealBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.sm,
+    backgroundColor: colors.primary,
+    borderRadius: radius.round,
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    minWidth: 190,
+  },
+  revealBtnText: {
+    ...typography.label,
+    fontWeight: '800',
+    color: colors.textOnPrimary,
+  },
+  backActionBtn: {
+    position: 'absolute',
+    bottom: spacing.md,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    borderRadius: radius.round,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  backActionText: {
+    ...typography.caption,
+    fontWeight: '700',
+    color: colors.textOnPrimary,
+  },
   cardPt: {
     marginTop: spacing.sm,
     fontSize: 18,
@@ -731,74 +991,253 @@ const styles = StyleSheet.create({
     color: colors.textOnPrimary,
     textAlign: 'center',
   },
-  speakerBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.round,
-    marginTop: spacing.lg,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+  // ---- Hint bottom sheet ----
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(10,12,28,0.45)',
   },
-  speakerBtnActive: {
-    backgroundColor: colors.primary,
+  hintSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xl,
   },
-  structureRow: {
+  hintSheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.border,
+    marginBottom: spacing.md,
+  },
+  hintSheetTitle: {
+    ...typography.section,
+    color: colors.text,
+    textAlign: 'center',
+  },
+  hintSheetSentence: {
+    ...typography.body,
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.primary,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+  hintParts: {
+    marginTop: spacing.md,
+    gap: spacing.sm,
+  },
+  hintPartRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 3,
-  },
-  structureTag: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: colors.primary,
-    color: colors.textOnPrimary,
-    fontSize: 11,
-    fontWeight: '800',
-    textAlign: 'center',
-    lineHeight: 22,
-    marginRight: 8,
-  },
-  structureBoxOnDark: {
-    marginTop: spacing.md,
-    alignSelf: 'stretch',
-    backgroundColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: colors.surface,
     borderRadius: radius.md,
     padding: spacing.sm,
   },
-  structureBoxOnLight: {
+  hintPartTag: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.sm,
+  },
+  hintPartTagText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: colors.textOnPrimary,
+  },
+  hintPartLabel: {
+    ...typography.eyebrow,
+    fontSize: 9,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+  },
+  hintPartValue: {
+    ...typography.body,
+    color: colors.text,
+    marginTop: 1,
+  },
+  hintEmpty: {
+    ...typography.caption,
+    color: colors.textFaint,
+    textAlign: 'center',
     marginTop: spacing.md,
-    alignSelf: 'stretch',
+  },
+  hintExplanationBox: {
+    marginTop: spacing.md,
     backgroundColor: colors.primarySoft,
     borderRadius: radius.md,
-    paddingVertical: 6,
-    paddingHorizontal: spacing.sm,
+    padding: spacing.sm + 4,
   },
-  structureRowCompact: {
+  hintExplanationLabel: {
+    ...typography.eyebrow,
+    fontSize: 9,
+    color: colors.primary,
+    textTransform: 'uppercase',
+  },
+  hintExplanationText: {
+    ...typography.body,
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.text,
+    marginTop: 2,
+  },
+  hintDoneBtn: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.primary,
+    borderRadius: radius.round,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  hintDoneText: {
+    ...typography.label,
+    fontWeight: '800',
+    color: colors.textOnPrimary,
+  },
+  // ---- Speaking practice sheet ----
+  practiceBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(10,12,28,0.45)',
+  },
+  practiceSheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xl,
+  },
+  practiceHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 0,
+    gap: spacing.sm,
   },
-  structureTagSmall: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    fontSize: 9,
-    lineHeight: 16,
-    marginRight: 6,
+  practiceHeaderIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  structureValue: {
-    flex: 1,
-    fontSize: 11,
+  practiceTitle: {
+    ...typography.section,
+    fontSize: 16,
     color: colors.text,
   },
-  structureTagOnDark: {
-    backgroundColor: colors.textOnPrimary,
-    color: colors.primary,
+  practiceSubtitle: {
+    ...typography.caption,
+    color: colors.textMuted,
   },
-  structureValueOnDark: {
+  practiceClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  practiceCloseText: {
     fontSize: 14,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  practiceSentenceBox: {
+    marginTop: spacing.md,
+    backgroundColor: colors.primarySoft,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    alignItems: 'center',
+  },
+  practiceSentence: {
+    ...typography.display,
+    fontSize: 20,
+    lineHeight: 27,
+    color: colors.text,
+    textAlign: 'center',
+  },
+  practiceStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    marginTop: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.round,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  practiceStatusSpeaking: {
+    backgroundColor: colors.primarySoft,
+  },
+  practiceStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.success,
+  },
+  practiceStatusDotActive: {
+    backgroundColor: colors.primary,
+  },
+  practiceStatusText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textMuted,
+  },
+  practiceTranscript: {
+    marginTop: spacing.md,
+    maxHeight: 150,
+    gap: 6,
+  },
+  practiceEmpty: {
+    ...typography.caption,
+    color: colors.textFaint,
+    textAlign: 'center',
+    paddingVertical: spacing.md,
+  },
+  practiceBubbleRow: {
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 8,
+    maxWidth: '92%',
+  },
+  practiceBubbleUser: {
+    alignSelf: 'flex-end',
+    backgroundColor: colors.primarySoft,
+    borderBottomRightRadius: 4,
+  },
+  practiceBubbleTutor: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.surface,
+    borderBottomLeftRadius: 4,
+  },
+  practiceBubbleUserText: {
+    fontSize: 14,
+    lineHeight: 19,
+    color: colors.text,
+  },
+  practiceBubbleTutorText: {
+    fontSize: 14,
+    lineHeight: 19,
+    color: colors.text,
+  },
+  practiceStopBtn: {
+    marginTop: spacing.lg,
+    backgroundColor: colors.primary,
+    borderRadius: radius.round,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  practiceStopBtnIdle: {
+    backgroundColor: colors.primaryPressed,
+  },
+  practiceStopText: {
+    ...typography.label,
+    fontWeight: '800',
     color: colors.textOnPrimary,
   },
   reviewToggleRow: {
@@ -913,12 +1352,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#8A6D00',
-  },
-  flipHint: {
-    position: 'absolute',
-    bottom: spacing.md,
-    fontSize: 12,
-    color: colors.textFaint,
   },
   ratingRow: {
     flexDirection: 'row',

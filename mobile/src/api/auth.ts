@@ -4,8 +4,10 @@ import { apiRequest } from './client';
 export type AuthResponse = {
   /** Short-lived access JWT. */
   token: string;
-  /** Opaque rotating refresh token — single-use, exchanged at `/refresh`. */
-  refreshToken: string;
+  /** Opaque rotating refresh token — single-use, exchanged at `/refresh`.
+   * Snake_case because that is what the server sends; the client does not
+   * transform response keys. */
+  refresh_token: string;
   user: User;
 };
 

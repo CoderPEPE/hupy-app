@@ -4,7 +4,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { useT } from '../i18n';
 import { colors, radius, shadows } from '../theme';
 
-function GoogleMark({ size }: { size: number }) {
+export function GoogleMark({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 48 48">
       <Path

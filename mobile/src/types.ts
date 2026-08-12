@@ -17,7 +17,24 @@ export type User = {
 // Planets & lessons
 // ---------------------------------------------------------------------------
 
-export type PlanetStatus = 'active' | 'locked' | 'completed';
+/** The spec's six planet states (§6 "Estados do planeta"). */
+export type PlanetStatus =
+  | 'locked'
+  | 'available'
+  | 'in_progress'
+  | 'review'
+  | 'conquered'
+  | 'mastered';
+
+/** States that mean the planet is behind the learner. */
+export function isPlanetFinished(status: PlanetStatus): boolean {
+  return status === 'conquered' || status === 'mastered';
+}
+
+/** The one planet the learner should be working on right now. */
+export function currentPlanet<T extends { status: PlanetStatus }>(planets: T[]): T | undefined {
+  return planets.find((p) => !isPlanetFinished(p.status) && p.status !== 'locked') ?? planets[0];
+}
 
 export type PlanetProgress = {
   sentences: number;
@@ -47,6 +64,17 @@ export type Planet = {
   unlock_progress: number;
   mastered_sentences: number;
   total_sentences: number;
+  /** CEFR band of the planet: 'A1' | 'A2' | 'B1' | 'B2' | 'B2+' | 'C1'. */
+  level: string;
+  /** The planet's communication goal. */
+  goal: string;
+  /** Blocks completed so far (0..=10) — derived from mastery server-side. */
+  completed_blocks: number;
+  /** Total blocks on the planet (10). */
+  total_blocks: number;
+  /** Essential skills below 60% — what a pending review targets. Empty when
+   * the planet has nothing to revisit. */
+  review_skills: string[];
   progress: PlanetProgress;
 };
 
@@ -66,18 +94,50 @@ export type PlanetDetail = Planet & {
   lessons: PlanetLesson[];
 };
 
-export type PlanetLessonKind = 'learn' | 'practice' | 'test' | 'master';
+/** The standard 10-block path every planet follows (spec: "Estrutura padrão
+ * dos 10 blocos"). */
+export type PlanetLessonKind =
+  | 'context'
+  | 'vocabulary'
+  | 'phrases'
+  | 'structure'
+  | 'listening'
+  | 'pronunciation'
+  | 'recall'
+  | 'variations'
+  | 'conversation'
+  | 'mission';
 
-/** One step of the planet's lesson path (Learn -> Practice -> Test -> Master). */
+/** The spec's six block states (§6 "Estados do bloco"). */
+export type BlockState =
+  | 'locked'
+  | 'available'
+  | 'in_progress'
+  | 'completed'
+  | 'review'
+  | 'mastered';
+
+/** One block of the planet's ten-block path. */
 export type PlanetLesson = {
   id: string;
   position: number;
   kind: PlanetLessonKind;
   title: string;
   description: string;
-  completed: boolean;
-  locked: boolean;
+  state: BlockState;
+  /** The progress metric this block trains — what its review would drill. */
+  skill: string;
 };
+
+/** A block the learner has finished (including one flagged for review). */
+export function isBlockDone(state: BlockState): boolean {
+  return state === 'completed' || state === 'review' || state === 'mastered';
+}
+
+/** The next block to open: the first one that is reachable and unfinished. */
+export function nextBlock(blocks: PlanetLesson[]): PlanetLesson | null {
+  return blocks.find((b) => b.state === 'available' || b.state === 'in_progress') ?? null;
+}
 
 export type LessonStepKind = 'teach' | 'repeat' | 'question' | 'review' | 'praise' | 'correction';
 
@@ -104,6 +164,40 @@ export type LessonStep = {
 export type Lesson = {
   planet_id: string;
   steps: LessonStep[];
+};
+
+// ---------------------------------------------------------------------------
+// Personalized audio stories (one per conquered planet)
+// ---------------------------------------------------------------------------
+
+export type PlanetStory = {
+  id: string;
+  title: string;
+  status: string;
+  /** Ordered transcript units in the target language. */
+  sentences: string[];
+  /** 1:1 base-language translation per unit ('' where unavailable). */
+  translation: string[];
+  duration_secs: number;
+  position_secs: number;
+  completed: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+/** One row of the story library: a course planet + its story state. */
+export type StoryListEntry = {
+  planet: {
+    id: string;
+    number: number;
+    title: string;
+    color: string;
+    level: string;
+    goal: string;
+  };
+  /** True once the planet is conquered (or its story already exists). */
+  unlocked: boolean;
+  story: PlanetStory | null;
 };
 
 // ---------------------------------------------------------------------------

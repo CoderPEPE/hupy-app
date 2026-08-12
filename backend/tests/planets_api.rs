@@ -27,8 +27,8 @@ async fn list_is_scoped_to_the_users_course() {
     // The default course is (pt, en).
     assert_eq!(planets[0]["base_language"], "pt");
     assert_eq!(planets[0]["language"], "en");
-    // First planet active, the rest locked behind it.
-    assert_eq!(planets[0]["status"], "active");
+    // First planet open, the rest locked behind it.
+    assert_eq!(planets[0]["status"], "available");
     for p in planets.iter().skip(1) {
         assert_eq!(
             p["status"], "locked",
@@ -75,10 +75,17 @@ async fn detail_returns_sentences_and_lesson_path() {
         detail["sentences"].as_array().unwrap().len() >= 40,
         "{detail}"
     );
-    assert_eq!(detail["lessons"].as_array().unwrap().len(), 4);
-    assert_eq!(detail["lessons"][0]["kind"], "learn");
-    assert!(!detail["lessons"][0]["locked"].as_bool().unwrap());
-    assert!(detail["lessons"][1]["locked"].as_bool().unwrap());
+    // The spec's standard 10-block path, with per-user completion derived
+    // from mastery: block 1 starts unlocked, the rest locked behind it.
+    assert_eq!(detail["lessons"].as_array().unwrap().len(), 10);
+    assert_eq!(detail["lessons"][0]["kind"], "context");
+    assert_eq!(detail["lessons"][0]["state"], "available");
+    assert_eq!(detail["lessons"][1]["state"], "locked");
+    // Every block names the skill its review would drill.
+    assert_eq!(detail["lessons"][4]["skill"], "listening");
+    assert_eq!(detail["level"], "A1");
+    assert_eq!(detail["completed_blocks"], 0);
+    assert_eq!(detail["total_blocks"], 10);
 }
 
 #[tokio::test]
@@ -295,7 +302,8 @@ async fn completing_planet_one_unlocks_planet_two() {
     .await;
     assert_eq!(status.as_u16(), 200);
 
-    // All six metrics are now >= 0.8 (mastery ~0.87) -> planet 2 is active.
+    // All six metrics are now >= 0.8 (mastery ~0.87) and no essential skill
+    // is under the floor -> planet 1 is conquered, so planet 2 opens.
     let (status, body) = request(
         &app,
         "GET",
@@ -306,5 +314,5 @@ async fn completing_planet_one_unlocks_planet_two() {
     )
     .await;
     assert_eq!(status.as_u16(), 200, "{body}");
-    assert_eq!(body["status"], "active", "{body}");
+    assert_eq!(body["status"], "available", "{body}");
 }

@@ -42,7 +42,7 @@ pub const TEST_SECRET: &str = "integration-test-secret-0123456789abcdef";
 /// seeded course content every test reads).
 const USER_TABLES: &str = "users, conversations, messages, corrections, flashcards, \
      card_reviews, user_stats, user_badges, user_planet_progress, user_sentence_progress, \
-     tts_audio, refresh_tokens";
+     planet_stories, tts_audio, refresh_tokens";
 
 /// The shared test pool: the per-binary database is created on first use,
 /// migrations run once per process, then the user tables are truncated so
@@ -157,6 +157,7 @@ pub fn app_with_limits(auth_rate_max: usize, tts_rate_max: usize, write_rate_max
         cors_origin: None,
         tts_model: "gpt-4o-mini-tts".into(),
         tts_voice: "marin".into(),
+        story_model: "gpt-4.1-mini".into(),
         db_pool_max_size: 4,
         auth_rate_max_requests: auth_rate_max,
         auth_rate_window_secs: 60,

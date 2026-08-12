@@ -10,6 +10,7 @@ pub mod flashcard;
 pub mod gamification;
 pub mod planet;
 pub mod refresh_token;
+pub mod story;
 pub mod user;
 pub mod voice;
 
@@ -18,5 +19,6 @@ pub use flashcard::{Card, NewCard};
 pub use gamification::UserStats;
 pub use planet::{ActivePlanet, LessonStep, Planet, PlanetProgress, Sentence, TutorSentence};
 pub use refresh_token::RefreshToken;
+pub use story::PlanetStory;
 pub use user::{NewUser, User};
 pub use voice::TutorVoice;

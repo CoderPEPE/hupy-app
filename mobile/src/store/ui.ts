@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 
-export type TabKey = 'chat' | 'flashcards' | 'planets' | 'lessons' | 'profile';
+// The spec's five bottom tabs (Home, Planets, Chat, Flashcards, Audio).
+// 'lessons'/'profile' stay valid internally: Lessons is folded into each
+// planet's block list, and Profile is reached from the Home avatar.
+export type TabKey = 'home' | 'planets' | 'chat' | 'flashcards' | 'audio' | 'lessons' | 'profile';
 
 /**
  * Pure UI state. All learning data (planets, lessons, flashcards, reviews,
@@ -39,7 +42,7 @@ type UiState = {
 };
 
 export const useUiStore = create<UiState>((set) => ({
-  activeTab: 'planets',
+  activeTab: 'home',
   setTab: (tab) => set({ activeTab: tab }),
 
   selectedPlanetId: null,

@@ -17,7 +17,8 @@ export function localeTag(locale: Locale): string {
   return locale === 'pt-BR' ? 'pt-BR' : locale === 'es' ? 'es-ES' : 'en-US';
 }
 
-/** Best-effort device locale via Hermes' built-in Intl — no extra dependency. */
+/** Best-effort device locale via Hermes' built-in Intl — no extra dependency.
+ * A device language the app doesn't ship falls back to English. */
 function detectLocale(): Locale {
   try {
     const tag = Intl.DateTimeFormat().resolvedOptions().locale ?? 'en';

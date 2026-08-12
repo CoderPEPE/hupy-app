@@ -13,6 +13,10 @@ export const colors = {
     lavender: '#A8A4EC',
     accent: '#3D8BFF',
     mint: '#8EE3B8',
+    /** Warm counterpoint to the purple — the headline stop and its rule. */
+    orange: '#F2762E',
+    /** Tinted panel behind a feature card (Home hero, Hupy Live). */
+    purpleWash: '#EFECFB',
   },
 
   // Text

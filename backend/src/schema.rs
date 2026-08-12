@@ -169,6 +169,23 @@ diesel::table! {
 }
 
 diesel::table! {
+    planet_stories (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        planet_id -> Uuid,
+        title -> Text,
+        status -> Text,
+        sentences -> Jsonb,
+        translation -> Jsonb,
+        duration_secs -> Int4,
+        position_secs -> Int4,
+        completed -> Bool,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     planets (id) {
         id -> Uuid,
         number -> Int4,
@@ -185,6 +202,9 @@ diesel::table! {
         language -> Varchar,
         #[max_length = 8]
         base_language -> Varchar,
+        #[max_length = 8]
+        level -> Varchar,
+        goal -> Text,
     }
 }
 
@@ -300,6 +320,8 @@ diesel::joinable!(lesson_steps -> planets (planet_id));
 diesel::joinable!(messages -> conversations (conversation_id));
 diesel::joinable!(planet_lessons -> planets (planet_id));
 diesel::joinable!(planet_sentences -> planets (planet_id));
+diesel::joinable!(planet_stories -> planets (planet_id));
+diesel::joinable!(planet_stories -> users (user_id));
 diesel::joinable!(refresh_tokens -> users (user_id));
 diesel::joinable!(user_badges -> badges (badge_id));
 diesel::joinable!(user_badges -> users (user_id));
@@ -319,6 +341,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     messages,
     planet_lessons,
     planet_sentences,
+    planet_stories,
     planets,
     refresh_tokens,
     tts_audio,

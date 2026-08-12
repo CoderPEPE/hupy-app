@@ -44,8 +44,9 @@ import { useFlashcards, usePlanet, usePlanets } from '../api/hooks';
 import { AppTabBar } from '../components/AppTabBar';
 import { GradientBar } from '../components/GradientBar';
 import { LanguageSwitch } from '../components/LanguageSwitch';
+import { StateChip } from '../components/StateChip';
 import { StreakXpBar } from '../components/StreakXpBar';
-import { plural, useT } from '../i18n';
+import { plural, useT, type TranslationKey } from '../i18n';
 import {
   levelVisualStyle,
   planetImageSource,
@@ -55,7 +56,7 @@ import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
 import { radius, spacing } from '../theme';
 import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
-import type { Planet, PlanetDetail, PlanetLesson } from '../types';
+import { isBlockDone, nextBlock, type Planet, type PlanetDetail, type PlanetLesson } from '../types';
 
 // ---------------------------------------------------------------------------
 // Space palette (the planets tab is a full dark scene)
@@ -380,7 +381,7 @@ function ProgressCard({
 }
 
 // ---------------------------------------------------------------------------
-// Lesson path (Learn -> Practice -> Test -> Master) with golden bases
+// The ten-block path, with golden bases
 // ---------------------------------------------------------------------------
 
 function LessonRow({
@@ -393,7 +394,13 @@ function LessonRow({
   onPress: () => void;
 }) {
   const t = useT();
-  const state = lesson.completed ? 'completed' : lesson.locked ? 'locked' : 'current';
+  const state = lesson.state;
+  const locked = state === 'locked';
+  const done = isBlockDone(state);
+  // "Revisar" reads as a call to action, not as a failure: the block is done,
+  // it just wants another pass.
+  const needsReview = state === 'review';
+  const circleColor = needsReview ? GOLD : done ? '#27AE60' : SPACE_ACCENT;
 
   return (
     <View style={styles.lessonRow}>
@@ -403,7 +410,7 @@ function LessonRow({
           <Svg width={46} height={110} style={styles.lessonWinding}>
             <Path
               d="M23,46 C 31,64 15,86 23,110"
-              stroke={state === 'locked' ? SPACE_TEXT_FAINT : SPACE_ACCENT}
+              stroke={locked ? SPACE_TEXT_FAINT : SPACE_ACCENT}
               strokeWidth={2}
               fill="none"
               strokeLinecap="round"
@@ -416,18 +423,17 @@ function LessonRow({
           <View
             style={[
               styles.lessonCircle,
-              state === 'completed' && { backgroundColor: '#27AE60', borderColor: '#27AE60' },
-              state === 'current' && { backgroundColor: SPACE_ACCENT, borderColor: lighten(SPACE_ACCENT, 0.5) },
-              state === 'locked' && { backgroundColor: '#2A2F47', borderColor: '#383E58' },
+              !locked && { backgroundColor: circleColor, borderColor: lighten(circleColor, 0.5) },
+              locked && { backgroundColor: '#2A2F47', borderColor: '#383E58' },
             ]}
           >
-            {state === 'locked' ? (
+            {locked ? (
               <Lock size={15} color="rgba(255,255,255,0.5)" />
             ) : (
               <Text style={styles.lessonCircleText}>{lesson.position}</Text>
             )}
           </View>
-          {state === 'completed' && (
+          {done && !needsReview && (
             <View style={styles.checkBadge}>
               <Check size={9} color="#FFFFFF" strokeWidth={3.5} />
             </View>
@@ -435,36 +441,46 @@ function LessonRow({
         </View>
       </View>
 
-      {/* lesson card */}
+      {/* block card */}
       <View style={styles.lessonCard}>
         <View style={{ flex: 1 }}>
           <Text style={styles.lessonCardTitle}>
             {lesson.position}. {lesson.title}
           </Text>
           <Text style={styles.lessonCardDesc}>{lesson.description}</Text>
+          <View style={{ marginTop: 5 }}>
+            <StateChip block={state} dark />
+          </View>
         </View>
         <Pressable
-          onPress={state === 'locked' ? undefined : onPress}
+          onPress={locked ? undefined : onPress}
           style={[
             styles.lessonPill,
-            state === 'completed' && styles.lessonPillDone,
-            state === 'current' && styles.lessonPillCurrent,
-            state === 'locked' && styles.lessonPillLocked,
+            done && !needsReview && styles.lessonPillDone,
+            needsReview && styles.lessonPillReview,
+            !done && !locked && styles.lessonPillCurrent,
+            locked && styles.lessonPillLocked,
           ]}
-          disabled={state === 'locked'}
+          disabled={locked}
         >
-          {state === 'locked' && <Lock size={12} color={SPACE_TEXT_FAINT} />}
+          {locked && <Lock size={12} color={SPACE_TEXT_FAINT} />}
           <Text
             style={[
               styles.lessonPillText,
-              state === 'completed' && styles.lessonPillTextDone,
-              state === 'locked' && { color: SPACE_TEXT_FAINT },
+              done && !needsReview && styles.lessonPillTextDone,
+              locked && { color: SPACE_TEXT_FAINT },
             ]}
           >
-            {state === 'completed' ? t('planets.completed') : state === 'current' ? t('planets.continue') : t('planets.locked')}
+            {needsReview
+              ? t('planets.startReview')
+              : done
+                ? t('planets.completed')
+                : locked
+                  ? t('planets.locked')
+                  : t('planets.continue')}
           </Text>
-          {state !== 'locked' && (
-            <ChevronRight size={14} color={state === 'completed' ? '#1E7A43' : '#FFFFFF'} />
+          {!locked && (
+            <ChevronRight size={14} color={done && !needsReview ? '#1E7A43' : '#FFFFFF'} />
           )}
         </Pressable>
       </View>
@@ -739,8 +755,11 @@ export function PlanetsScreen() {
   };
 
   const lessons = detail?.lessons ?? [];
-  const nextLesson = lessons.find((l) => !l.completed && !l.locked) ?? null;
-  const allDone = lessons.length > 0 && lessons.every((l) => l.completed);
+  const nextLesson = nextBlock(lessons);
+  const allDone = lessons.length > 0 && lessons.every((l) => isBlockDone(l.state));
+  // A conquered planet with a decayed skill sends the learner to that block
+  // rather than to the end of the path.
+  const reviewBlock = lessons.find((l) => l.state === 'review') ?? null;
   const locked = planet?.status === 'locked';
 
   const stars = useMemo(() => starsFor(7, 46), []);
@@ -754,11 +773,16 @@ export function PlanetsScreen() {
       ? t('planets.locked')
       : detailQuery.isLoading
         ? t('planets.loadingLessons')
-        : allDone
-          ? t('planets.planetComplete')
-          : t('planets.continueLesson', { position: nextLesson?.position ?? 1 });
+        : reviewBlock
+          ? t('planets.startReview')
+          : allDone
+            ? t('planets.planetComplete')
+            : t('planets.continueLesson', { position: nextLesson?.position ?? 1 });
 
   const continueReady = !locked && !detailQuery.isLoading && (!!nextLesson || allDone);
+  // "Continuar" must open exactly where the learner stopped (spec §8): the
+  // pending review first, then the next unfinished block, then the last one.
+  const continueTarget = reviewBlock ?? nextLesson ?? lessons[lessons.length - 1] ?? null;
 
   return (
     <View style={styles.screen}>
@@ -785,12 +809,37 @@ export function PlanetsScreen() {
           </View>
         ) : (
           <>
-            {/* centered planet header */}
+            {/* centered planet header: number, level, name, state, goal and
+                blocks — the spec's §8 identity block */}
             <View style={styles.titleBlock}>
-              <Text style={styles.planetTag}>{t('planets.planetTag', { number: planet.number })}</Text>
+              <Text style={styles.planetTag}>
+                {t('planets.planetTag', { number: planet.number })} · {planet.level}
+              </Text>
               <Text style={styles.planetName}>{planet.title.toUpperCase()}</Text>
               {subtitleParts[0] && <Text style={styles.planetSubtitle}>{subtitleParts[0]}</Text>}
-              {subtitleParts[1] && <Text style={styles.planetSubtitleMuted}>{subtitleParts[1]}</Text>}
+              {planet.goal ? (
+                <Text style={styles.planetGoalText}>{planet.goal}</Text>
+              ) : (
+                subtitleParts[1] && <Text style={styles.planetSubtitleMuted}>{subtitleParts[1]}</Text>
+              )}
+              <View style={styles.headerMetaRow}>
+                <StateChip status={planet.status} dark />
+                <Text style={styles.headerBlocks}>
+                  {t('planets.blocksOf', {
+                    completed: planet.completed_blocks,
+                    total: planet.total_blocks,
+                  })}
+                </Text>
+              </View>
+              {planet.review_skills.length > 0 && (
+                <Text style={styles.headerReview}>
+                  {t('planets.reviewSkills', {
+                    skills: planet.review_skills
+                      .map((s) => t(`skill.${s}` as TranslationKey))
+                      .join(', '),
+                  })}
+                </Text>
+              )}
             </View>
 
             {/* stars + planet showcase */}
@@ -969,7 +1018,7 @@ export function PlanetsScreen() {
           <GradientCta
             label={continueLabel}
             disabled={!continueReady}
-            onPress={() => beginLesson(planet.id, nextLesson?.id ?? lessons[lessons.length - 1]?.id ?? '')}
+            onPress={() => beginLesson(planet.id, continueTarget?.id ?? '')}
           />
         </View>
       )}
@@ -1051,6 +1100,32 @@ const styles = StyleSheet.create({
     marginTop: 2,
     fontSize: 14,
     color: SPACE_TEXT_MUTED,
+    textAlign: 'center',
+  },
+  planetGoalText: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    color: SPACE_TEXT_MUTED,
+    textAlign: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  headerMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  headerBlocks: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: SPACE_TEXT_MUTED,
+  },
+  headerReview: {
+    marginTop: 5,
+    fontSize: 12,
+    fontWeight: '700',
+    color: GOLD,
     textAlign: 'center',
   },
   showcase: {
@@ -1399,6 +1474,11 @@ const styles = StyleSheet.create({
   },
   lessonPillCurrent: {
     backgroundColor: SPACE_ACCENT,
+  },
+  lessonPillReview: {
+    backgroundColor: GOLD_DEEP,
+    borderWidth: 1,
+    borderColor: GOLD,
   },
   lessonPillLocked: {
     backgroundColor: 'rgba(255,255,255,0.07)',

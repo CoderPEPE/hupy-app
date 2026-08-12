@@ -69,6 +69,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .nest("/api/flashcards", api::flashcards::router(state.clone()))
         .nest("/api/gamification", api::gamification::router())
+        .nest("/api/stories", api::stories::router())
         .nest("/api/tts", api::tts::router(state.clone()))
         .nest("/api/voices", api::voices::router())
         // A global ceiling on how long any handler may run — a stuck DB call

@@ -4,41 +4,45 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { usePlanet, usePlanets } from '../api/hooks';
 import { AppTabBar } from '../components/AppTabBar';
 import { PlanetTile } from '../components/PlanetTile';
+import { StateChip } from '../components/StateChip';
 import { StreakXpBar } from '../components/StreakXpBar';
 import { Card, ScreenHeader } from '../components/ui';
 import { useT } from '../i18n';
 import { useUiStore } from '../store/ui';
 import { colors, radius, spacing, typography } from '../theme';
-import type { Planet, PlanetLesson } from '../types';
+import { isBlockDone, type Planet, type PlanetLesson } from '../types';
 
 function LessonRow({ lesson, onPress }: { lesson: PlanetLesson; onPress: () => void }) {
-  const t = useT();
-  const state = lesson.completed ? 'completed' : lesson.locked ? 'locked' : 'current';
+  const locked = lesson.state === 'locked';
+  const done = isBlockDone(lesson.state);
 
   return (
-    <Card row style={styles.lessonRow} onPress={state === 'locked' ? undefined : onPress} disabled={state === 'locked'}>
+    <Card row style={styles.lessonRow} onPress={locked ? undefined : onPress} disabled={locked}>
       <View
         style={[
           styles.lessonBadge,
-          state === 'completed' && styles.lessonBadgeDone,
-          state === 'current' && styles.lessonBadgeCurrent,
+          done && styles.lessonBadgeDone,
+          !done && !locked && styles.lessonBadgeCurrent,
         ]}
       >
-        {state === 'completed' ? (
+        {done ? (
           <Check size={14} color="#FFFFFF" strokeWidth={3} />
-        ) : state === 'locked' ? (
+        ) : locked ? (
           <Lock size={13} color={colors.textFaint} />
         ) : (
           <Text style={styles.lessonBadgeText}>{lesson.position}</Text>
         )}
       </View>
       <View style={{ flex: 1 }}>
-        <Text style={[styles.lessonTitle, state === 'locked' && styles.lessonTitleLocked]}>{lesson.title}</Text>
+        <Text style={[styles.lessonTitle, locked && styles.lessonTitleLocked]}>{lesson.title}</Text>
         <Text style={styles.lessonDesc} numberOfLines={1}>
           {lesson.description}
         </Text>
+        <View style={{ marginTop: 3 }}>
+          <StateChip block={lesson.state} />
+        </View>
       </View>
-      {state !== 'locked' && <ChevronRight size={18} color={colors.textFaint} />}
+      {!locked && <ChevronRight size={18} color={colors.textFaint} />}
     </Card>
   );
 }

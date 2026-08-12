@@ -15,7 +15,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Ellipse, Path } from 'react-native-svg';
 import { LanguageSwitch } from './LanguageSwitch';
 import { colors, radius, shadows, spacing } from '../theme';
 
@@ -36,15 +36,19 @@ function StarSpark({ size = 14, color = colors.gold }: { size?: number; color?: 
   );
 }
 
-function SpeechBubble({ size = 40 }: { size?: number }) {
+/** The tilted orbit line the mascot stands in front of. */
+function Orbit({ width, height }: { width: number; height: number }) {
   return (
-    <Svg width={size} height={size * 0.72} viewBox="0 0 40 29">
-      <Path
-        d="M4 0 H36 C38.2 0 40 1.8 40 4 V17 C40 19.2 38.2 21 36 21 H15 L7 28.5 V21 H4 C1.8 21 0 19.2 0 17 V4 C0 1.8 1.8 0 4 0 Z"
-        fill="#FFFFFF"
-        opacity={0.9}
+    <Svg width={width} height={height} style={styles.orbit}>
+      <Ellipse
+        cx={width / 2}
+        cy={height / 2}
+        rx={width / 2 - 2}
+        ry={height / 2 - 2}
+        stroke={colors.authBlobPrimary}
+        strokeWidth={1.5}
+        fill="none"
       />
-      <Path d="M9 8 H29 M9 13.5 H22" stroke={colors.brand.purple} strokeWidth={2.4} strokeLinecap="round" />
     </Svg>
   );
 }
@@ -63,8 +67,8 @@ type Props = {
   belowCard?: React.ReactNode;
   /** Overrides the corner language pill's default instant-toggle behavior. */
   onLanguagePress?: () => void;
-  /** false = fit everything on one screen, no ScrollView (hero/mascot sized
-   * from the actual window height so it still fits on small devices). */
+  /** false = compact: hero/mascot sized from the actual window height so the
+   * form fits on one screen (it still scrolls if a short device can't hold it). */
   scroll?: boolean;
 };
 
@@ -86,11 +90,11 @@ export function AuthLayout({
   const { height: windowHeight } = useWindowDimensions();
   const compact = !scroll;
 
-  // In compact (no-scroll) mode, size the hero + mascot from the actual
-  // window height instead of fixed pixels, so everything fits on one
-  // screen on both a small phone and a tall one.
-  const heroHeight = compact ? Math.round(windowHeight * 0.27) : undefined;
-  const mascotHeight = compact ? Math.round(windowHeight * 0.25) : 300;
+  // In compact mode the mascot is sized from the actual window height instead
+  // of fixed pixels, so it fills the gap between wordmark and headline on both
+  // a small phone and a tall one.
+  const mascotHeight = compact ? Math.round(windowHeight * 0.36) : 300;
+  const orbitHeight = Math.round(windowHeight * 0.3);
   const mascotWidth = Math.round(mascotHeight * MASCOT_ASPECT);
 
   // Entrance choreography
@@ -169,34 +173,42 @@ export function AuthLayout({
         <View style={[styles.blob, styles.blobC]} />
       </View>
 
-      <View style={styles.languageSwitchWrap}>
-        <LanguageSwitch onPress={onLanguagePress} />
-      </View>
-
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Body scroll={scroll} style={[styles.content, compact && styles.contentCompact]}>
+        <ScrollView
+          contentContainerStyle={[styles.content, compact && styles.contentCompact]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.languageSwitchWrap}>
+            <LanguageSwitch onPress={onLanguagePress} />
+          </View>
+
           <Animated.View
             style={[
               styles.hero,
               heroStyle,
               mascot != null && styles.heroWithMascot,
-              compact && mascot != null && { paddingBottom: heroHeight },
+              // Compact: the hero absorbs the slack above the card, which pins
+              // the wordmark to the top and the headline block to the bottom —
+              // the mascot fills the gap between them.
+              compact && mascot != null && styles.heroFill,
             ]}
           >
             {mascot != null && (
               <View style={styles.decorations} pointerEvents="none">
-                <View style={styles.decorBubble}>
-                  <SpeechBubble size={compact ? 38 : 46} />
-                </View>
+                <Orbit width={SCREEN_WIDTH * 1.05} height={orbitHeight} />
                 <View style={styles.decorStarA}>
-                  <StarSpark size={16} />
+                  <StarSpark size={16} color={colors.brand.orange} />
                 </View>
                 <View style={styles.decorStarB}>
-                  <StarSpark size={11} color={colors.brand.mint} />
+                  <StarSpark size={11} color={colors.brand.lavender} />
                 </View>
+                <View style={[styles.dot, styles.dotA]} />
+                <View style={[styles.dot, styles.dotB]} />
+                <View style={[styles.dot, styles.dotC]} />
               </View>
             )}
             <View
@@ -213,16 +225,22 @@ export function AuthLayout({
                 <Text style={styles.mark}>{mark}</Text>
               )}
             </View>
-            <Text style={[styles.title, mascot != null && styles.titleLeft, compact && styles.titleCompact]}>
-              {title}
-            </Text>
-            <Text style={[styles.subtitle, mascot != null && styles.subtitleLeft, compact && styles.subtitleCompact]}>
-              {subtitle}
-            </Text>
+            <View>
+              <Text style={[styles.title, mascot != null && styles.titleLeft, compact && styles.titleCompact]}>
+                {/* A headline ending in a full stop gets it in orange, the brand's
+                    one warm accent — "Seu inglês começa aqui." */}
+                {title.endsWith('.') ? title.slice(0, -1) : title}
+                {title.endsWith('.') && <Text style={styles.titleStop}>.</Text>}
+              </Text>
+              {mascot != null && <View style={styles.titleRule} />}
+              <Text style={[styles.subtitle, mascot != null && styles.subtitleLeft, compact && styles.subtitleCompact]}>
+                {subtitle}
+              </Text>
+            </View>
             {mascot != null && (
               <Image
                 source={mascot}
-                style={[styles.mascotImage, compact && { width: mascotWidth, height: mascotHeight }]}
+                style={[styles.mascotImage, compact && { width: mascotWidth, height: mascotHeight, bottom: -36, right: -46 }]}
                 resizeMode="contain"
               />
             )}
@@ -230,30 +248,9 @@ export function AuthLayout({
 
           <Animated.View style={[styles.card, cardStyle, compact && styles.cardCompact]}>{children}</Animated.View>
           {belowCard != null && <View style={[styles.belowCard, compact && styles.belowCardCompact]}>{belowCard}</View>}
-        </Body>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
-  );
-}
-
-/** Switches between a scrolling and a fixed (no-scroll) container without
- * duplicating the two call sites above. */
-function Body({
-  scroll,
-  style,
-  children,
-}: {
-  scroll: boolean;
-  style: (ViewStyle | false | undefined)[];
-  children: React.ReactNode;
-}) {
-  if (!scroll) {
-    return <View style={style}>{children}</View>;
-  }
-  return (
-    <ScrollView contentContainerStyle={style} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-      {children}
-    </ScrollView>
   );
 }
 
@@ -274,10 +271,8 @@ const styles = StyleSheet.create({
     borderRadius: radius.round,
   },
   languageSwitchWrap: {
-    position: 'absolute',
-    top: spacing.md,
-    right: spacing.md,
-    zIndex: 1,
+    alignSelf: 'flex-end',
+    marginBottom: spacing.sm,
   },
   blobA: {
     width: SCREEN_WIDTH * 1.15,
@@ -307,7 +302,6 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
   },
   contentCompact: {
-    flex: 1,
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     justifyContent: 'space-between',
@@ -322,23 +316,54 @@ const styles = StyleSheet.create({
     paddingBottom: 180,
     marginBottom: spacing.md,
   },
+  heroFill: {
+    flexGrow: 1,
+    flexShrink: 0,
+    paddingBottom: 0,
+    justifyContent: 'space-between',
+  },
+  orbit: {
+    position: 'absolute',
+    top: '4%',
+    left: '-16%',
+    transform: [{ rotate: '-12deg' }],
+  },
+  dot: {
+    position: 'absolute',
+    borderRadius: radius.round,
+    backgroundColor: colors.brand.lavender,
+    opacity: 0.5,
+  },
+  dotA: {
+    width: 14,
+    height: 14,
+    top: '4%',
+    left: '58%',
+  },
+  dotB: {
+    width: 9,
+    height: 9,
+    top: '20%',
+    right: '2%',
+  },
+  dotC: {
+    width: 11,
+    height: 11,
+    top: '38%',
+    left: '-2%',
+  },
   decorations: {
     ...StyleSheet.absoluteFill,
   },
-  decorBubble: {
-    position: 'absolute',
-    top: -6,
-    right: 6,
-  },
   decorStarA: {
     position: 'absolute',
-    top: 58,
-    right: 30,
+    top: '9%',
+    right: '14%',
   },
   decorStarB: {
     position: 'absolute',
-    top: 118,
-    left: '58%',
+    top: '2%',
+    left: '4%',
   },
   markWrap: {
     width: 88,
@@ -367,9 +392,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   markWrapCompact: {
-    width: 128,
-    height: 42,
-    marginBottom: spacing.sm,
+    width: 252,
+    height: 82,
+    marginBottom: 0,
   },
   logo: {
     width: '100%',
@@ -381,17 +406,28 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 30,
     fontWeight: '800',
-    color: colors.text,
+    color: colors.primary,
     letterSpacing: -0.5,
     textAlign: 'center',
+  },
+  titleStop: {
+    color: colors.brand.orange,
+  },
+  titleRule: {
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.brand.orange,
+    marginTop: 14,
   },
   titleLeft: {
     textAlign: 'left',
     maxWidth: '68%',
   },
   titleCompact: {
-    fontSize: 23,
-    maxWidth: '100%',
+    fontSize: 34,
+    lineHeight: 41,
+    maxWidth: '70%',
   },
   subtitle: {
     marginTop: spacing.sm,
@@ -406,10 +442,10 @@ const styles = StyleSheet.create({
     maxWidth: '64%',
   },
   subtitleCompact: {
-    marginTop: 4,
-    fontSize: 13,
-    lineHeight: 18,
-    maxWidth: '78%',
+    marginTop: 12,
+    fontSize: 15,
+    lineHeight: 21,
+    maxWidth: '54%',
   },
   mascotImage: {
     position: 'absolute',
@@ -434,6 +470,6 @@ const styles = StyleSheet.create({
   },
   cardCompact: {
     paddingTop: spacing.md,
-    paddingBottom: spacing.md,
+    paddingBottom: 10,
   },
 });

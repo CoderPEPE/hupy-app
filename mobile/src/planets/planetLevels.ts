@@ -1,12 +1,12 @@
 import type { ImageSourcePropType } from 'react-native';
 import type { Planet, PlanetDetail, PlanetLessonKind } from '../types';
 
-/** Lesson path maps to four difficulty tiers (Learn → Master). */
+/** The 10-block path maps to four art tiers (start → conquered). */
 export const PLANET_LEVELS = [
-  { level: 1, kind: 'learn' as PlanetLessonKind, label: 'Learn' },
-  { level: 2, kind: 'practice' as PlanetLessonKind, label: 'Practice' },
-  { level: 3, kind: 'test' as PlanetLessonKind, label: 'Test' },
-  { level: 4, kind: 'master' as PlanetLessonKind, label: 'Master' },
+  { level: 1, kind: 'context' as PlanetLessonKind, label: 'Context' },
+  { level: 2, kind: 'phrases' as PlanetLessonKind, label: 'Phrases' },
+  { level: 3, kind: 'recall' as PlanetLessonKind, label: 'Recall' },
+  { level: 4, kind: 'mission' as PlanetLessonKind, label: 'Mission' },
 ] as const;
 
 export type PlanetVisualLevel = (typeof PLANET_LEVELS)[number]['level'];

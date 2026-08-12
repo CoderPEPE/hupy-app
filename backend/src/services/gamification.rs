@@ -98,13 +98,24 @@ pub fn compute_metrics(
     }
     let lessons_completed = planet_lessons.values().sum();
 
+    // "Conquered" here must mean exactly what the Planets tab means by it
+    // (spec §5): past the mastery bar *and* no essential skill below the
+    // floor — otherwise a planet badge could fire for a planet still showing
+    // a pending review. The rounding tolerance mirrors
+    // `services::planets::at_least`.
+    let eps = 1e-9;
+    let floor = crate::services::planets::MIN_ESSENTIAL_SKILL - eps;
     let planets_completed: i64 = planets::table
         .inner_join(
             user_planet_progress::table.on(user_planet_progress::planet_id
                 .eq(planets::id)
                 .and(user_planet_progress::user_id.eq(user_id))),
         )
-        .filter(user_planet_progress::mastery.ge(planets::unlock_mastery))
+        .filter(user_planet_progress::mastery.ge(planets::unlock_mastery - eps))
+        .filter(user_planet_progress::sentences.ge(floor))
+        .filter(user_planet_progress::listening.ge(floor))
+        .filter(user_planet_progress::pronunciation.ge(floor))
+        .filter(user_planet_progress::conversation.ge(floor))
         .select(planets::number)
         .distinct()
         .count()

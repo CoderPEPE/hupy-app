@@ -4,11 +4,18 @@ import { baseLanguageForLocale, useI18nStore, useT, type Locale } from '../i18n'
 import { useAuthStore } from '../store/auth';
 import { colors, radius } from '../theme';
 
-const NEXT: Record<Locale, Locale> = { en: 'es', es: 'pt-BR', 'pt-BR': 'en' };
+const CODE: Record<Locale, string> = { en: 'EN', es: 'ES', 'pt-BR': 'PT' };
 
-/** Cycles the UI locale through English → Spanish → Portuguese. One tap moves
- * to the next locale (there are three, so a picker would be overkill).
- * `onPress`, when given, replaces the instant cycle (e.g. opening the full
+/** Preference order for where one tap lands. Portuguese and English come
+ * first, so the switch reads "PT | EN" for the Brazilian audience the product
+ * is built for; Spanish is the fallback, and stays reachable from the full
+ * picker (auth) and Profile. */
+const ORDER: Locale[] = ['pt-BR', 'en', 'es'];
+
+/** Toggles the UI locale. One tap moves to the next locale in `ORDER` that
+ * isn't the current one — skipping the language being learned, since the
+ * interface language doubles as the learner's base and the two can't match.
+ * `onPress`, when given, replaces the instant toggle (e.g. opening the full
  * language-selection screen from the auth screens instead). */
 export function LanguageSwitch({ dark = false, onPress }: { dark?: boolean; onPress?: () => void }) {
   const t = useT();
@@ -17,14 +24,13 @@ export function LanguageSwitch({ dark = false, onPress }: { dark?: boolean; onPr
   const user = useAuthStore((s) => s.user);
   const setLanguage = useAuthStore((s) => s.setLanguage);
 
+  const next =
+    ORDER.find((l) => l !== locale && baseLanguageForLocale(l) !== user?.language) ?? locale;
+
   /** The learner's language and the interface language are the same choice, so
    * when signed in this changes the account's base language — a locale set
    * only on the device would be overwritten by the account on next launch. */
   const cycle = () => {
-    let next = NEXT[locale];
-    // The base can never equal the language being learned; with three
-    // languages, skipping the collision always lands on a valid one.
-    if (user && baseLanguageForLocale(next) === user.language) next = NEXT[next];
     if (!user) {
       setLocale(next);
       return;
@@ -42,8 +48,11 @@ export function LanguageSwitch({ dark = false, onPress }: { dark?: boolean; onPr
       accessibilityRole="button"
       accessibilityLabel={t('language.change')}
     >
+      {/* Shows where a tap lands ("PT | EN") rather than just the current
+          locale, so the toggle is discoverable without a picker. */}
       <Text style={[styles.text, dark && styles.textDark]}>
-        {locale === 'en' ? 'EN' : locale === 'es' ? 'ES' : 'PT'}
+        {CODE[locale]}
+        <Text style={[styles.next, dark && styles.textDark]}>{`  |  ${CODE[next]}`}</Text>
       </Text>
     </Pressable>
   );
@@ -54,7 +63,6 @@ const styles = StyleSheet.create({
     minWidth: 40,
     height: 40,
     borderRadius: radius.round,
-    backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
@@ -65,9 +73,13 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
   },
   text: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
-    color: colors.textMuted,
+    color: colors.primary,
+  },
+  next: {
+    fontWeight: '600',
+    color: colors.textFaint,
   },
   textDark: {
     color: '#FFFFFF',

@@ -107,6 +107,9 @@ const styles = StyleSheet.create({
   },
   sideRight: {
     justifyContent: 'flex-end',
+    // Pushes the right slot to the edge on headers with no title to separate
+    // it from the left one (Home: wordmark left, bell right).
+    marginLeft: 'auto',
   },
   titleWrap: {
     flex: 1,

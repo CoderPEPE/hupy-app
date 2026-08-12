@@ -128,13 +128,22 @@ function t(key: Parameters<typeof translate>[1], params?: Parameters<typeof tran
   return translate(useI18nStore.getState().locale, key, params);
 }
 
-export function useVoiceConversation(onToolCall: ToolCallHandler) {
+export function useVoiceConversation(
+  onToolCall: ToolCallHandler,
+  opts?: { instructionsSuffix?: string },
+) {
   const recorder = useAudioRecorder();
   const [status, setStatus] = useState<ConversationStatus>('idle');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  // Always-current practice suffix (e.g. a specific sentence to drill), so
+  // the frozen `start` callback never reads a stale closure.
+  const suffixRef = useRef(opts?.instructionsSuffix ?? '');
+  useEffect(() => {
+    suffixRef.current = opts?.instructionsSuffix ?? '';
+  }, [opts?.instructionsSuffix]);
   const statusRef = useRef<ConversationStatus>('idle');
   // Earliest time (ms epoch) at which mic audio may be sent to the API again.
   const micUnmuteAtRef = useRef(0);
@@ -580,6 +589,7 @@ async function ensureMicPermission(): Promise<boolean> {
       instructions = res.instructions ?? FALLBACK_TUTOR_PROMPT;
       tools = res.tools ?? [];
       startSessionVoice = res.voice ?? FALLBACK_VOICE;
+      if (suffixRef.current) instructions += `\n\n${suffixRef.current}`;
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         // The JWT expired or was revoked — bounce to the login screen.

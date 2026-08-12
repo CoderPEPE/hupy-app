@@ -24,6 +24,7 @@ import {
   getConversations,
 } from './conversations';
 import { getGamificationStats } from './gamification';
+import { generateStory, getStories, saveStoryProgress } from './stories';
 import { getVoices } from './voices';
 import { storage, StorageKeys } from '../storage';
 import type { CardRating } from '../types';
@@ -39,6 +40,7 @@ export const queryKeys = {
   gamification: ['gamification'] as const,
   catalog: ['catalog'] as const,
   voices: ['voices'] as const,
+  stories: ['stories'] as const,
 };
 
 /** Real course-content counts for the selected course, used by the pre-login
@@ -95,6 +97,18 @@ export function useConversations() {
   return useQuery({ queryKey: queryKeys.conversations, queryFn: getConversations });
 }
 
+/** The story library. A story the AI is still writing arrives as
+ * `status: 'generating'`, so the list polls until every story is ready
+ * rather than leaving the learner staring at a spinner that never resolves. */
+export function useStories() {
+  return useQuery({
+    queryKey: queryKeys.stories,
+    queryFn: getStories,
+    refetchInterval: (query) =>
+      query.state.data?.some((e) => e.story?.status === 'generating') ? 4000 : false,
+  });
+}
+
 export function useConversation(id: string | null | undefined) {
   return useQuery({
     queryKey: queryKeys.conversation(id ?? ''),
@@ -136,6 +150,29 @@ export function useMasterSentence() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.planets });
       qc.invalidateQueries({ queryKey: queryKeys.gamification });
+    },
+  });
+}
+
+export function useGenerateStory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: generateStory,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.stories });
+      qc.invalidateQueries({ queryKey: queryKeys.planets });
+    },
+  });
+}
+
+/** Persists playback position; the returned story is merged into the cache. */
+export function useSaveStoryProgress() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ planetId, positionSecs, completed }: { planetId: string; positionSecs: number; completed?: boolean }) =>
+      saveStoryProgress(planetId, positionSecs, completed),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.stories });
     },
   });
 }

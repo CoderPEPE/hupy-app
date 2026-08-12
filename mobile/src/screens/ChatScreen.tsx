@@ -50,7 +50,13 @@ import { displayName } from '../utils/userName';
 import { audioLevels } from '../voice/audioLevels';
 import { useVoiceConversation, type ToolCallHandler } from '../voice/useVoiceConversation';
 import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
-import type { ChatMessage, ConversationSummary, LessonCorrection, LessonStepKind } from '../types';
+import {
+  currentPlanet,
+  type ChatMessage,
+  type ConversationSummary,
+  type LessonCorrection,
+  type LessonStepKind,
+} from '../types';
 
 function CorrectionCard({
   correction,
@@ -280,8 +286,7 @@ export function ChatScreen() {
   // never disagrees with what the live session is actually scoped to.
   const planet =
     (lessonPlanetId ? planets.find((p) => p.id === lessonPlanetId) : undefined) ??
-    planets.find((p) => p.status === 'active') ??
-    planets[0] ??
+    currentPlanet(planets) ??
     null;
 
   const createConversation = useCreateConversation();
@@ -495,7 +500,7 @@ export function ChatScreen() {
     prevStatusesRef.current = statuses;
     if (prev.length === statuses.length) {
       statuses.forEach((s, i) => {
-        if (prev[i] === 'locked' && s === 'active' && planets[i]) {
+        if (prev[i] === 'locked' && s !== 'locked' && planets[i]) {
           setUnlockNotice(t('chat.unlockNotice', { number: planets[i].number }));
           setConfettiKey(Date.now());
         }

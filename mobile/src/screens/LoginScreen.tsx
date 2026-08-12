@@ -1,13 +1,12 @@
 import { useMutation } from '@tanstack/react-query';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ChevronRight, Sparkles } from 'lucide-react-native';
+import { Lock, Mail } from 'lucide-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AuthLayout } from '../components/AuthLayout';
 import { AuthTextField } from '../components/AuthTextField';
-import { Checkbox } from '../components/Checkbox';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { SocialAuthRow } from '../components/SocialAuthRow';
+import { GoogleMark } from '../components/SocialAuthRow';
 import type { AuthStackParamList } from '../navigation/RootNavigator';
 import { useT } from '../i18n';
 import { useAuthStore } from '../store/auth';
@@ -16,11 +15,31 @@ import { isValidEmail } from '../utils/validation';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
+/** Full-width outlined action — the Google and create-account rows under the form. */
+function OutlineButton({
+  label,
+  onPress,
+  icon,
+  strong,
+}: {
+  label: string;
+  onPress: () => void;
+  icon?: React.ReactNode;
+  /** Purple bold text, for the create-account row. */
+  strong?: boolean;
+}) {
+  return (
+    <Pressable style={styles.outline} onPress={onPress} accessibilityRole="button">
+      {icon}
+      <Text style={[styles.outlineText, strong && styles.outlineTextStrong]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export function LoginScreen({ navigation }: Props) {
   const t = useT();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const signIn = useAuthStore((s) => s.signIn);
 
@@ -71,29 +90,13 @@ export function LoginScreen({ navigation }: Props) {
       subtitle={t('auth.login.subtitle')}
       onLanguagePress={() => navigation.navigate('LanguageSelect')}
       scroll={false}
-      belowCard={
-        <Pressable style={styles.aiCard} onPress={() => navigation.navigate('CourseOverview')}>
-          <Sparkles size={15} color={colors.primary} />
-          <Text style={styles.aiCardText}>{t('auth.aiCard.title')}</Text>
-          <ChevronRight size={15} color={colors.textFaint} />
-        </Pressable>
-      }
     >
-      <Text style={styles.continueWith}>{t('auth.login.continueWith')}</Text>
-      <SocialAuthRow />
-
-      <View style={styles.dividerRow}>
-        <View style={styles.divider} />
-        <Text style={styles.dividerText}>{t('auth.login.orEmail')}</Text>
-        <View style={styles.divider} />
-      </View>
-
       <Animated.View style={fieldStyle()}>
         <AuthTextField
-          label={t('auth.email')}
+          icon={<Mail size={20} color={colors.primary} />}
           value={email}
           onChangeText={setEmail}
-          placeholder={t('auth.emailPlaceholder')}
+          placeholder={t('auth.email')}
           keyboardType="email-address"
           autoComplete="email"
           autoCapitalize="none"
@@ -104,10 +107,10 @@ export function LoginScreen({ navigation }: Props) {
 
       <Animated.View style={fieldStyle()}>
         <AuthTextField
-          label={t('auth.password')}
+          icon={<Lock size={20} color={colors.primary} />}
           value={password}
           onChangeText={setPassword}
-          placeholder={t('auth.login.passwordPlaceholder')}
+          placeholder={t('auth.password')}
           secure
           autoComplete="password"
           returnKeyType="done"
@@ -116,69 +119,56 @@ export function LoginScreen({ navigation }: Props) {
         />
       </Animated.View>
 
-      <View style={styles.rememberRow}>
-        <Checkbox checked={rememberMe} onChange={setRememberMe} label={t('auth.rememberMe')} />
-        <Pressable hitSlop={8}>
-          <Text style={styles.forgotText}>{t('auth.forgotPassword')}</Text>
-        </Pressable>
-      </View>
-
-      <Animated.View style={fieldStyle()}>
-        <PrimaryButton title={t('auth.login.submit')} onPress={handleSubmit} loading={mutation.isPending} />
+      <Animated.View style={[styles.submit, fieldStyle()]}>
+        <PrimaryButton
+          title={t('auth.login.submit').toUpperCase()}
+          onPress={handleSubmit}
+          loading={mutation.isPending}
+        />
       </Animated.View>
 
-      <Pressable
-        style={styles.linkRow}
-        onPress={() => navigation.navigate('Register')}
-        hitSlop={8}
-      >
-        <Text style={styles.linkText}>
-          {t('auth.login.noAccount')}
-          <Text style={styles.linkStrong}>{t('auth.login.createAccount')}</Text>
-        </Text>
+      <Pressable style={styles.forgotRow} hitSlop={8}>
+        <Text style={styles.forgotText}>{t('auth.forgotPassword')}</Text>
       </Pressable>
+
+      <View style={styles.dividerRow}>
+        <View style={styles.divider} />
+        <Text style={styles.dividerText}>{t('auth.login.or')}</Text>
+        <View style={styles.divider} />
+      </View>
+
+      <OutlineButton
+        label={t('auth.login.continueWithProvider', { provider: 'Google' })}
+        onPress={() => {}}
+        icon={<GoogleMark size={20} />}
+      />
+      <View style={styles.outlineGap} />
+      <OutlineButton
+        label={t('auth.login.createAccount')}
+        onPress={() => navigation.navigate('Register')}
+        strong
+      />
     </AuthLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  continueWith: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textMuted,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
+  submit: {
+    marginTop: spacing.sm,
   },
-  rememberRow: {
-    flexDirection: 'row',
+  forgotRow: {
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.sm,
+    paddingVertical: 12,
   },
   forgotText: {
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '700',
     color: colors.primary,
-  },
-  aiCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    backgroundColor: colors.card,
-    borderRadius: radius.round,
-    paddingVertical: 10,
-  },
-  aiCardText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.text,
   },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: spacing.sm,
-    marginBottom: spacing.sm,
+    marginBottom: 12,
   },
   divider: {
     flex: 1,
@@ -186,23 +176,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
   dividerText: {
-    marginHorizontal: spacing.sm,
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textFaint,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  linkRow: {
-    alignItems: 'center',
-    paddingVertical: 2,
-  },
-  linkText: {
-    fontSize: 15,
+    marginHorizontal: spacing.md,
+    fontSize: 14,
     color: colors.textMuted,
   },
-  linkStrong: {
-    color: colors.primary,
+  outline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.card,
+  },
+  outlineGap: {
+    height: spacing.sm,
+  },
+  outlineText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  outlineTextStrong: {
     fontWeight: '800',
+    color: colors.primary,
   },
 });

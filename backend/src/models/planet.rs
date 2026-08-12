@@ -4,9 +4,10 @@ use diesel::{Queryable, Selectable};
 use serde_json::Value;
 use uuid::Uuid;
 
-/// A planet in the course path (Mercury … Neptune). Field order MUST match the
-/// `planets` table column order (diesel maps `Queryable` positionally):
-/// `base_language` was appended after `language` by a migration.
+/// A planet in the course path. Field order MUST match the `planets` table
+/// column order (diesel maps `Queryable` positionally): `language` and
+/// `base_language` were appended by migrations, `level`/`goal` by the
+/// 60-planet curriculum expansion.
 #[derive(Debug, Queryable, Selectable)]
 #[diesel(table_name = planets)]
 pub struct Planet {
@@ -22,6 +23,10 @@ pub struct Planet {
     pub language: String,
     /// The explanation language of this course (the learner's own): 'en' | 'es' | 'pt'.
     pub base_language: String,
+    /// CEFR band of the planet: 'A1' | 'A2' | 'B1' | 'B2' | 'B2+' | 'C1'.
+    pub level: String,
+    /// The planet's communication goal (what the learner can do afterwards).
+    pub goal: String,
 }
 
 /// A user's per-planet progress row. `mastery` is always the computed average

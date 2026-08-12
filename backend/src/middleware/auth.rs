@@ -58,6 +58,7 @@ mod tests {
             cors_origin: None,
             tts_model: "gpt-4o-mini-tts".into(),
             tts_voice: "marin".into(),
+            story_model: "gpt-4.1-mini".into(),
             db_pool_max_size: 1,
             auth_rate_max_requests: 30,
             auth_rate_window_secs: 60,

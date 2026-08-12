@@ -130,13 +130,18 @@ describe('restore', () => {
 
 // --- signIn / signUp -----------------------------------------------------
 
+/** The auth response exactly as the server sends it — snake_case
+ * `refresh_token`. The mock previously used camelCase, which typechecked
+ * against a wrong type and hid a real login crash, so this shape is shared
+ * and must stay in step with the backend's `AuthResponse`. */
+type WireAuthResponse = { token: string; refresh_token: string; user: User };
+
 describe('signIn', () => {
   it('stores the token pair, user, and course languages', async () => {
-    const { token, user: u } = { token: 'token-new', user: user({ base_language: 'en', language: 'es' }) };
-    mockApi<() => Promise<{ token: string; refreshToken: string; user: User }>>(authApi.login).mockResolvedValue({
-      token,
-      refreshToken: 'refresh-new',
-      user: u,
+    mockApi<() => Promise<WireAuthResponse>>(authApi.login).mockResolvedValue({
+      token: 'token-new',
+      refresh_token: 'refresh-new',
+      user: user({ base_language: 'en', language: 'es' }),
     });
 
     await useAuthStore.getState().signIn('ana@example.com', 'password123');
@@ -149,15 +154,33 @@ describe('signIn', () => {
     expect(storage.getString(StorageKeys.targetLanguage)).toBe('es');
     expect(useAuthStore.getState().user?.id).toBe('u1');
   });
+
+  /// Regression: reading the refresh token under the wrong key handed
+  /// `undefined` to MMKV, which surfaced to the user as a raw C++ variant
+  /// error under the password field instead of a login failure.
+  it('fails with a readable error when the response has no refresh token', async () => {
+    mockApi<() => Promise<unknown>>(authApi.login).mockResolvedValue({
+      token: 'token-new',
+      user: user(),
+    });
+
+    await expect(useAuthStore.getState().signIn('ana@example.com', 'password123')).rejects.toThrow(
+      /valid session/i,
+    );
+    // Nothing half-written: a failed sign-in leaves no session behind.
+    expect(getSecureStorage().getString(SecureKeys.authToken)).toBeNull();
+    expect(getSecureStorage().getString(SecureKeys.refreshToken)).toBeNull();
+    expect(useAuthStore.getState().token).toBeNull();
+  });
 });
 
 describe('signUp', () => {
   it('passes the stored course pair to registration and stores the pair', async () => {
     storage.set(StorageKeys.baseLanguage, 'es');
     storage.set(StorageKeys.targetLanguage, 'pt');
-    mockApi<() => Promise<{ token: string; refreshToken: string; user: User }>>(authApi.register).mockResolvedValue({
+    mockApi<() => Promise<WireAuthResponse>>(authApi.register).mockResolvedValue({
       token: 'token-reg',
-      refreshToken: 'refresh-reg',
+      refresh_token: 'refresh-reg',
       user: user({ base_language: 'es', language: 'pt', name: 'Ana' }),
     });
 

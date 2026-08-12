@@ -8,6 +8,7 @@ import { Card, IconButton, ScreenHeader } from '../components/ui';
 import { plural, useT } from '../i18n';
 import { useUiStore } from '../store/ui';
 import { colors, radius, spacing, typography } from '../theme';
+import { isBlockDone } from '../types';
 
 /** Interstitial shown before a lesson starts — frames the upcoming lesson as
  * a "chapter" (title + how many lessons remain) before handing off to the
@@ -19,8 +20,9 @@ export function ChapterIntroScreen() {
 
   const lessons = detail?.lessons ?? [];
   const lesson = lessons.find((l) => l.id === lessonIntro?.lessonId);
-  const remaining = lessons.filter((l) => !l.completed).length;
-  const progress = lessons.length ? lessons.filter((l) => l.completed).length / lessons.length : 0;
+  const done = lessons.filter((l) => isBlockDone(l.state));
+  const remaining = lessons.length - done.length;
+  const progress = lessons.length ? done.length / lessons.length : 0;
 
   if (!lessonIntro || !lesson) return null;
 

@@ -22,6 +22,9 @@ pub struct Config {
     /// OpenAI TTS voice and model used by `/api/tts`.
     pub tts_model: String,
     pub tts_voice: String,
+    /// Chat model that writes the personalized planet audio stories. When no
+    /// API key is configured the deterministic template writer is used instead.
+    pub story_model: String,
     /// Max connections in the r2d2 Postgres pool.
     pub db_pool_max_size: u32,
     /// Per-IP sliding-window limits for the auth endpoints.
@@ -72,6 +75,7 @@ impl Config {
         let cors_origin = env::var("CORS_ORIGIN").ok();
         let tts_model = env::var("TTS_MODEL").unwrap_or_else(|_| "gpt-4o-mini-tts".into());
         let tts_voice = env::var("TTS_VOICE").unwrap_or_else(|_| "marin".into());
+        let story_model = env::var("STORY_MODEL").unwrap_or_else(|_| "gpt-4.1-mini".into());
         let db_pool_max_size = env::var("DB_POOL_MAX_SIZE")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -124,6 +128,7 @@ impl Config {
             cors_origin,
             tts_model,
             tts_voice,
+            story_model,
             db_pool_max_size,
             auth_rate_max_requests,
             auth_rate_window_secs,

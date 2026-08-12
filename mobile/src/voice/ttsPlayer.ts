@@ -40,8 +40,10 @@ class SpeechPlayer {
    * `{ ephemeral: true }` the voice is used for this clip only and does not
    * become the remembered fallback — the voice picker's previews use this so
    * auditioning a voice can't change what the app actually speaks with.
+   * `{ speed }` plays the clip faster/slower (server-side TTS speed) — the
+   * story player's speed control uses this.
    */
-  async speak(text: string, voice?: string, opts?: { ephemeral?: boolean }): Promise<number> {
+  async speak(text: string, voice?: string, opts?: { ephemeral?: boolean; speed?: number }): Promise<number> {
     // Don't overlap clips: a new speak cancels whatever is playing.
     await this.stop();
     if (voice !== undefined && !opts?.ephemeral) this.currentVoice = voice;
@@ -51,7 +53,7 @@ class SpeechPlayer {
     const speakWith = voice ?? this.currentVoice;
     try {
       const ctx = await this.getContext();
-      const bytes = await getSpeech(text, undefined, speakWith);
+      const bytes = await getSpeech(text, opts?.speed, speakWith);
       const buffer = await ctx.decodeAudioData(bytes);
       if (buffer.length === 0) return 0;
 

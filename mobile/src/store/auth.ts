@@ -46,13 +46,35 @@ function readStoredUser(): User | null {
  */
 function persistUser(user: User): void {
   getSecureStorage().set(SecureKeys.authUser, JSON.stringify(user));
+  // Both writes are guarded: MMKV throws an unreadable native error on
+  // `undefined`, so a user payload missing a field must not take the whole
+  // sign-in down with it.
   if (user.base_language) storage.set(StorageKeys.baseLanguage, user.base_language);
-  storage.set(StorageKeys.targetLanguage, user.language);
+  if (user.language) storage.set(StorageKeys.targetLanguage, user.language);
 
   const locale = localeForBaseLanguage(user.base_language);
   const i18n = useI18nStore.getState();
   // Guarded: setting the same locale would re-render every screen for nothing.
   if (locale && locale !== i18n.locale) i18n.setLocale(locale);
+}
+
+/**
+ * Writes a fresh token pair + user after a login or registration.
+ *
+ * The tokens are validated before they are stored: MMKV is a native store that
+ * rejects `undefined` with an unreadable C++ variant error, so a response
+ * missing a field used to surface to the user as
+ * `MMKV.set(...): Cannot convert "undefined" to any type in variant<...>`
+ * under the password box instead of a login failure. A bad response is a
+ * failed sign-in, and it should read like one.
+ */
+function persistSession(res: authApi.AuthResponse): void {
+  if (typeof res?.token !== 'string' || typeof res?.refresh_token !== 'string') {
+    throw new Error('Login failed: the server did not return a valid session.');
+  }
+  getSecureStorage().set(SecureKeys.authToken, res.token);
+  getSecureStorage().set(SecureKeys.refreshToken, res.refresh_token);
+  persistUser(res.user);
 }
 
 /** The whole session is wiped: state, storage, and (fire-and-forget) the
@@ -111,11 +133,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signIn: async (email, password) => {
-    const { token, refreshToken, user } = await authApi.login(email, password);
-    getSecureStorage().set(SecureKeys.authToken, token);
-    getSecureStorage().set(SecureKeys.refreshToken, refreshToken);
-    persistUser(user);
-    set({ token, user });
+    const res = await authApi.login(email, password);
+    persistSession(res);
+    set({ token: res.token, user: res.user });
   },
 
   signUp: async (email, password, name) => {
@@ -123,17 +143,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // travels with the account; fall back to the backend defaults ('pt' → 'en').
     const baseLanguage = storage.getString(StorageKeys.baseLanguage) ?? undefined;
     const language = storage.getString(StorageKeys.targetLanguage) ?? undefined;
-    const { token, refreshToken, user } = await authApi.register(
+    const res = await authApi.register(
       email,
       password,
       baseLanguage,
       language,
       name?.trim(),
     );
-    getSecureStorage().set(SecureKeys.authToken, token);
-    getSecureStorage().set(SecureKeys.refreshToken, refreshToken);
-    persistUser(user);
-    set({ token, user });
+    persistSession(res);
+    set({ token: res.token, user: res.user });
   },
 
   /** Switches the learner's course on the backend — the ordered (base, target)
