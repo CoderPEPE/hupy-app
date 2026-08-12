@@ -1,20 +1,6 @@
+// react-native-mmkv is stubbed globally in jest.setup.js.
 import { apiArrayBuffer, apiRequest } from './client';
 import { storage, StorageKeys } from '../storage';
-
-jest.mock('react-native-mmkv', () => {
-  const store = new Map<string, string>();
-  return {
-    createMMKV: () => ({
-      getString: (key: string) => store.get(key) ?? null,
-      set: (key: string, value: string) => {
-        store.set(key, value);
-      },
-      remove: (key: string) => {
-        store.delete(key);
-      },
-    }),
-  };
-});
 
 const jsonResponse = (data: unknown, status: number) =>
   new Response(JSON.stringify(data), {

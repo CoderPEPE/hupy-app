@@ -1,6 +1,8 @@
 module.exports = {
   preset: 'jest-expo',
   testMatch: ['**/__tests__/**/*.test.[jt]s?(x)', '**/?(*.)+(spec|test).[jt]s?(x)'],
+  // Stubs react-native-mmkv (native module) before any suite imports storage.
+  setupFiles: ['<rootDir>/jest.setup.js'],
   // Based on jest-expo's own preset pattern (which whitelists `.pnpm` itself
   // so pnpm's nested node_modules/.pnpm/<pkg>/node_modules/<pkg> layout still
   // gets transformed), extended with this project's extra native packages.
