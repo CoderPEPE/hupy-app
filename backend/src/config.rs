@@ -95,3 +95,137 @@ impl Config {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Config::from_env reads the process environment, and tests mutate it —
+    // they must never run concurrently with each other.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    const ALL_VARS: [&str; 12] = [
+        "DATABASE_URL",
+        "JWT_SECRET",
+        "OPENAI_API_KEY",
+        "PORT",
+        "CORS_ORIGIN",
+        "TTS_MODEL",
+        "TTS_VOICE",
+        "DB_POOL_MAX_SIZE",
+        "AUTH_RATE_MAX",
+        "AUTH_RATE_WINDOW_SECS",
+        "TTS_RATE_MAX",
+        "TTS_RATE_WINDOW_SECS",
+    ];
+
+    /// Runs `f` with a locked environment, restoring every variable after.
+    fn with_env<F: FnOnce(), R: FnOnce() -> T, T>(mutate: F, read: R) -> T {
+        let _g = ENV_LOCK.lock().unwrap();
+        let saved: Vec<(String, Option<String>)> = ALL_VARS
+            .iter()
+            .map(|k| (k.to_string(), env::var(k).ok()))
+            .collect();
+        mutate();
+        let result = read();
+        for (k, v) in saved {
+            match v {
+                Some(v) => env::set_var(k, v),
+                None => env::remove_var(k),
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn missing_required_vars_fail_with_a_clear_message() {
+        with_env(
+            || {
+                env::remove_var("DATABASE_URL");
+                env::remove_var("JWT_SECRET");
+            },
+            || {
+                assert!(Config::from_env().unwrap_err().contains("DATABASE_URL"));
+
+                env::set_var("DATABASE_URL", "postgres://localhost/huppy");
+                env::remove_var("JWT_SECRET");
+                assert!(Config::from_env().unwrap_err().contains("JWT_SECRET"));
+            },
+        );
+    }
+
+    #[test]
+    fn defaults_apply_when_tunables_are_unset() {
+        with_env(
+            || {
+                env::set_var("DATABASE_URL", "postgres://localhost/huppy");
+                env::set_var("JWT_SECRET", "0123456789abcdef0123456789abcdef");
+                for k in ALL_VARS.iter().skip(2) {
+                    env::remove_var(k);
+                }
+            },
+            || {
+                let c = Config::from_env().unwrap();
+                assert_eq!(c.port, 3000);
+                assert_eq!(c.openai_api_key, "");
+                assert_eq!(c.cors_origin, None);
+                assert_eq!(c.tts_model, "gpt-4o-mini-tts");
+                assert_eq!(c.tts_voice, "marin");
+                assert_eq!(c.db_pool_max_size, 10);
+                assert_eq!(c.auth_rate_max_requests, 30);
+                assert_eq!(c.auth_rate_window_secs, 60);
+                assert_eq!(c.tts_rate_max_requests, 120);
+                assert_eq!(c.tts_rate_window_secs, 60);
+            },
+        );
+    }
+
+    #[test]
+    fn explicit_values_are_read() {
+        with_env(
+            || {
+                env::set_var("DATABASE_URL", "postgres://localhost/huppy");
+                env::set_var("JWT_SECRET", "0123456789abcdef0123456789abcdef");
+                env::set_var("PORT", "8080");
+                env::set_var("CORS_ORIGIN", "https://app.example.com");
+                env::set_var("TTS_MODEL", "tts-1");
+                env::set_var("TTS_VOICE", "alloy");
+                env::set_var("DB_POOL_MAX_SIZE", "3");
+                env::set_var("AUTH_RATE_MAX", "5");
+                env::set_var("AUTH_RATE_WINDOW_SECS", "10");
+                env::set_var("TTS_RATE_MAX", "2");
+                env::set_var("TTS_RATE_WINDOW_SECS", "7");
+            },
+            || {
+                let c = Config::from_env().unwrap();
+                assert_eq!(c.port, 8080);
+                assert_eq!(c.cors_origin.as_deref(), Some("https://app.example.com"));
+                assert_eq!(c.tts_model, "tts-1");
+                assert_eq!(c.tts_voice, "alloy");
+                assert_eq!(c.db_pool_max_size, 3);
+                assert_eq!(c.auth_rate_max_requests, 5);
+                assert_eq!(c.auth_rate_window_secs, 10);
+                assert_eq!(c.tts_rate_max_requests, 2);
+                assert_eq!(c.tts_rate_window_secs, 7);
+            },
+        );
+    }
+
+    #[test]
+    fn non_numeric_tunables_fall_back_to_defaults() {
+        with_env(
+            || {
+                env::set_var("DATABASE_URL", "postgres://localhost/huppy");
+                env::set_var("JWT_SECRET", "0123456789abcdef0123456789abcdef");
+                env::set_var("PORT", "not-a-port");
+                env::set_var("AUTH_RATE_MAX", "-1");
+            },
+            || {
+                let c = Config::from_env().unwrap();
+                assert_eq!(c.port, 3000);
+                assert_eq!(c.auth_rate_max_requests, 30);
+            },
+        );
+    }
+}

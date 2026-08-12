@@ -23,6 +23,12 @@ export const en = {
   'api.networkUnreachable': 'Could not reach the server. Is the backend running?',
   'api.requestFailed': 'Request failed with status {{status}}',
 
+  // Full-screen offline state (components/OfflineScreen.tsx) — shown while
+  // the backend is unreachable. The app clears it automatically on recovery.
+  'offline.title': 'No connection',
+  'offline.body': 'Huppy needs the server to reach your tutor. Check your internet connection — we will reconnect automatically.',
+  'offline.retry': 'Try again',
+
   // Auth — shared
   'auth.email': 'Email',
   'auth.emailPlaceholder': 'you@example.com',
@@ -42,6 +48,7 @@ export const en = {
   'auth.login.submit': 'Log in',
   'auth.login.or': 'or',
   'auth.login.continueWith': 'Continue with',
+  'auth.login.continueWithProvider': 'Continue with {{provider}}',
   'auth.login.orEmail': 'or log in with email',
   'auth.login.noAccount': 'New to Huppy? ',
   'auth.login.createAccount': 'Create an account',

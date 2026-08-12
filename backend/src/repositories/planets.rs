@@ -399,7 +399,6 @@ pub async fn tutor_sentences(
         let rows: Vec<(Uuid, String, String, String, String, String)> =
             match (language.as_str(), base_language.as_str()) {
                 ("es", "pt") => query
-                    .clone()
                     .select((
                         planet_sentences::id,
                         planet_sentences::es,
@@ -410,7 +409,6 @@ pub async fn tutor_sentences(
                     ))
                     .load(conn)?,
                 ("pt", "en") => query
-                    .clone()
                     .select((
                         planet_sentences::id,
                         planet_sentences::pt,
@@ -421,7 +419,6 @@ pub async fn tutor_sentences(
                     ))
                     .load(conn)?,
                 ("en", "es") => query
-                    .clone()
                     .select((
                         planet_sentences::id,
                         planet_sentences::en,
@@ -432,7 +429,6 @@ pub async fn tutor_sentences(
                     ))
                     .load(conn)?,
                 ("es", "en") => query
-                    .clone()
                     .select((
                         planet_sentences::id,
                         planet_sentences::es,
@@ -443,7 +439,6 @@ pub async fn tutor_sentences(
                     ))
                     .load(conn)?,
                 ("pt", "es") => query
-                    .clone()
                     .select((
                         planet_sentences::id,
                         planet_sentences::pt,
@@ -455,7 +450,6 @@ pub async fn tutor_sentences(
                     .load(conn)?,
                 // ("en", "pt") and any legacy fallback
                 _ => query
-                    .clone()
                     .select((
                         planet_sentences::id,
                         planet_sentences::en,
@@ -512,28 +506,22 @@ pub async fn cumulative_review_sample(
         let rows: Vec<(String, String)> =
             match (language.as_str(), base_language.as_str()) {
                 ("es", "pt") => query
-                    .clone()
                     .select((planet_sentences::es, planet_sentences::pt))
                     .load(conn)?,
                 ("pt", "en") => query
-                    .clone()
                     .select((planet_sentences::pt, planet_sentences::en))
                     .load(conn)?,
                 ("en", "es") => query
-                    .clone()
                     .select((planet_sentences::en, planet_sentences::es))
                     .load(conn)?,
                 ("es", "en") => query
-                    .clone()
                     .select((planet_sentences::es, planet_sentences::en))
                     .load(conn)?,
                 ("pt", "es") => query
-                    .clone()
                     .select((planet_sentences::pt, planet_sentences::es))
                     .load(conn)?,
                 // ("en", "pt") and any legacy fallback
                 _ => query
-                    .clone()
                     .select((planet_sentences::en, planet_sentences::pt))
                     .load(conn)?,
             };

@@ -24,6 +24,11 @@ export const ptBR: Translations = {
   'api.networkUnreachable': 'Não foi possível conectar ao servidor. O backend está rodando?',
   'api.requestFailed': 'Falha na requisição (status {{status}})',
 
+  // Full-screen offline state (components/OfflineScreen.tsx)
+  'offline.title': 'Sem conexão',
+  'offline.body': 'O Huppy precisa do servidor para falar com seu tutor. Verifique sua conexão com a internet — vamos reconectar automaticamente.',
+  'offline.retry': 'Tentar novamente',
+
   // Auth — shared
   'auth.email': 'E-mail',
   'auth.emailPlaceholder': 'voce@exemplo.com',
@@ -43,6 +48,7 @@ export const ptBR: Translations = {
   'auth.login.submit': 'Entrar',
   'auth.login.or': 'ou',
   'auth.login.continueWith': 'Continuar com',
+  'auth.login.continueWithProvider': 'Continuar com {{provider}}',
   'auth.login.orEmail': 'ou entre com e-mail',
   'auth.login.noAccount': 'Novo no Huppy? ',
   'auth.login.createAccount': 'Criar uma conta',

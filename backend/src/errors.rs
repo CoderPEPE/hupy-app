@@ -58,3 +58,80 @@ impl From<diesel::result::Error> for AppError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+    use diesel::result::{DatabaseErrorInformation, DatabaseErrorKind};
+
+    struct TestDbError;
+    impl DatabaseErrorInformation for TestDbError {
+        fn message(&self) -> &str {
+            "duplicate key value violates unique constraint"
+        }
+        fn details(&self) -> Option<&str> {
+            None
+        }
+        fn hint(&self) -> Option<&str> {
+            None
+        }
+        fn table_name(&self) -> Option<&str> {
+            None
+        }
+        fn column_name(&self) -> Option<&str> {
+            None
+        }
+        fn constraint_name(&self) -> Option<&str> {
+            None
+        }
+        fn statement_position(&self) -> Option<i32> {
+            None
+        }
+    }
+
+    fn status(err: AppError) -> StatusCode {
+        err.into_response().status()
+    }
+
+    #[test]
+    fn status_codes_match_error_kinds() {
+        assert_eq!(status(AppError::bad_request("x")), StatusCode::BAD_REQUEST);
+        assert_eq!(status(AppError::unauthorized("x")), StatusCode::UNAUTHORIZED);
+        assert_eq!(status(AppError::conflict("x")), StatusCode::CONFLICT);
+        assert_eq!(status(AppError::not_found("x")), StatusCode::NOT_FOUND);
+        assert_eq!(status(AppError::internal("x")), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn response_body_carries_a_json_error_message() {
+        let resp = AppError::not_found("planet not found").into_response();
+        let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["error"], "planet not found");
+    }
+
+    #[test]
+    fn diesel_not_found_maps_to_404() {
+        let err = AppError::from(diesel::result::Error::NotFound);
+        assert!(matches!(err, AppError::NotFound(_)));
+    }
+
+    #[test]
+    fn unique_violations_map_to_conflict() {
+        let err = AppError::from(diesel::result::Error::DatabaseError(
+            DatabaseErrorKind::UniqueViolation,
+            Box::new(TestDbError),
+        ));
+        assert!(matches!(err, AppError::Conflict(_)));
+    }
+
+    #[test]
+    fn other_database_errors_map_to_internal() {
+        let err = AppError::from(diesel::result::Error::DatabaseError(
+            DatabaseErrorKind::ForeignKeyViolation,
+            Box::new(TestDbError),
+        ));
+        assert!(matches!(err, AppError::Internal(_)));
+    }
+}

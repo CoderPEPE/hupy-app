@@ -1,11 +1,13 @@
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
-import React, { Component, useEffect, type ReactNode } from 'react';
+import React, { Component, useEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ApiError } from './src/api/client';
+import { useConnectivity } from './src/api/connectivity';
 import { GamificationCelebration } from './src/components/GamificationCelebration';
+import { OfflineScreen } from './src/components/OfflineScreen';
 import { translate, useI18nStore } from './src/i18n';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { useAuthStore } from './src/store/auth';
@@ -59,6 +61,29 @@ class ErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   }
 }
 
+/**
+ * Gates the whole app behind backend reachability: while `/health` is
+ * unreachable the OfflineScreen replaces the navigator (no screen should
+ * render in a state where every request would fail). The gate clears itself
+ * automatically once the connection comes back.
+ */
+function ConnectivityGate({ children }: { children: ReactNode }) {
+  const { status, retry } = useConnectivity();
+  // Once offline, keep the offline screen up through the retry's 'checking'
+  // phase (spinner on the button) — only a confirmed 'online' dismisses it.
+  // On the very first mount 'checking' renders the app behind the splash.
+  const [stuckOffline, setStuckOffline] = useState(false);
+  useEffect(() => {
+    if (status === 'offline') setStuckOffline(true);
+    else if (status === 'online') setStuckOffline(false);
+  }, [status]);
+
+  if (status === 'offline' || (stuckOffline && status === 'checking')) {
+    return <OfflineScreen retrying={status === 'checking'} onRetry={retry} />;
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   const restore = useAuthStore((s) => s.restore);
   const token = useAuthStore((s) => s.token);
@@ -73,11 +98,13 @@ export default function App() {
         <QueryClientProvider client={queryClient}>
           <ErrorBoundary>
             <StatusBar style="dark" />
-            <RootNavigator />
-            {/* Global confetti/toasts for level-ups and new achievements —
-                mounted above the navigator, only while signed in (the stats
-                endpoint needs a JWT). */}
-            {token ? <GamificationCelebration /> : null}
+            <ConnectivityGate>
+              <RootNavigator />
+              {/* Global confetti/toasts for level-ups and new achievements —
+                  mounted above the navigator, only while signed in (the stats
+                  endpoint needs a JWT). */}
+              {token ? <GamificationCelebration /> : null}
+            </ConnectivityGate>
           </ErrorBoundary>
         </QueryClientProvider>
       </SafeAreaProvider>

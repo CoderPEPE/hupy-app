@@ -496,6 +496,13 @@ async fn bump_progress(
     Path(planet_id): Path<Uuid>,
     Json(body): Json<ProgressBump>,
 ) -> Result<Json<PlanetSummary>> {
+    // A clean 404 before any validation or write: a missing planet must not
+    // surface as a database foreign-key 500, and its absence shouldn't be
+    // inferable from which other errors come back first.
+    let planet = repositories::planets::find(&state.pool, planet_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("planet not found"))?;
+
     if !services::planets::BUMPABLE_METRICS.contains(&body.metric.as_str()) {
         return Err(AppError::bad_request(format!(
             "unknown metric '{}'; expected one of {:?}",
@@ -503,10 +510,17 @@ async fn bump_progress(
             services::planets::BUMPABLE_METRICS
         )));
     }
-    if !body.delta.is_finite() || body.delta.abs() > 1.0 {
-        return Err(AppError::bad_request(
-            "delta must be a finite number between -1 and 1",
-        ));
+    if !body.delta.is_finite() {
+        return Err(AppError::bad_request("delta must be a finite number"));
+    }
+    // One call may only move a metric by the amount the tutor grades a single
+    // turn at — larger deltas are the old instant-unlock cheat vector.
+    if body.delta.abs() > services::planets::MAX_BUMP_DELTA {
+        return Err(AppError::bad_request(format!(
+            "delta must be between -{} and {} (tutor-graded adjustments only)",
+            services::planets::MAX_BUMP_DELTA,
+            services::planets::MAX_BUMP_DELTA
+        )));
     }
 
     services::planets::bump_metric_delta(&state.pool, user_id, planet_id, &body.metric, body.delta)
@@ -516,9 +530,6 @@ async fn bump_progress(
     }
 
     // Recompute the full summary so unlock status reflects the new mastery.
-    let planet = repositories::planets::find(&state.pool, planet_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("planet not found"))?;
     let summary = build_summary(&state.pool, user_id, &planet).await?;
 
     Ok(Json(summary))

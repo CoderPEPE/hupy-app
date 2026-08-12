@@ -42,10 +42,12 @@ pub fn language_names(base: &str, target: &str) -> (&'static str, &'static str) 
 /// The tutor's method prompt.
 ///
 /// Three placeholders are substituted in `build_session`:
-///   - `{{LEARNER}}`     — the signed-in learner's display name (it used to
-///     be a hardcoded "Sergio", which greeted every user by that name)
-///   - `{{TARGET_LANG}}` — the language being taught (English/Spanish/Portuguese)
-///   - `{{BASE_LANG}}`   — the language used for explanations
+///
+/// - `{{LEARNER}}` — the signed-in learner's display name (it used to be a
+///   hardcoded "Sergio", which greeted every user by that name)
+/// - `{{TARGET_LANG}}` — the language being taught (English/Spanish/Portuguese)
+/// - `{{BASE_LANG}}` — the language used for explanations
+///
 /// Pronouns are deliberately they/them: the account stores an email, not a gender.
 const CYCLE_PROMPT: &str = "\
 You are \"Huppy\", the personal {{TARGET_LANG}} tutor of a learner who speaks {{BASE_LANG}}, named {{LEARNER}}. \

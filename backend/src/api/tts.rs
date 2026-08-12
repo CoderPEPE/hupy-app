@@ -48,6 +48,16 @@ async fn tts(
     if text.len() > 4096 {
         return Err(AppError::bad_request("text too long (max 4096 chars)"));
     }
+    // Input validation before config checks, so a malformed request is
+    // always a 4xx regardless of server setup — a missing API key must not
+    // mask (or be distinguishable from) a bad payload.
+    if body.voice.as_deref().is_some_and(|v| v.len() > 64) {
+        return Err(AppError::bad_request("voice too long (max 64 chars)"));
+    }
+    let speed = body.speed.unwrap_or(1.0);
+    if !speed.is_finite() {
+        return Err(AppError::bad_request("speed must be a finite number"));
+    }
     if state.openai_api_key().is_empty() {
         return Err(AppError::internal(
             "OPENAI_API_KEY is not configured on the server",
@@ -59,10 +69,6 @@ async fn tts(
         .voice
         .filter(|v| !v.trim().is_empty())
         .unwrap_or_else(|| state.config.tts_voice.clone());
-    let speed = body.speed.unwrap_or(1.0);
-    if !speed.is_finite() {
-        return Err(AppError::bad_request("speed must be a finite number"));
-    }
     let speed = speed.clamp(0.25, 4.0);
     let key = services::tts::cache_key(&text, &voice, &model, speed);
 

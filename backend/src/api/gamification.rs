@@ -73,7 +73,7 @@ async fn stats(
             })
         })
         .collect();
-    badges.sort_by(|a, b| b.earned_at.cmp(&a.earned_at));
+    badges.sort_by_key(|b| std::cmp::Reverse(b.earned_at));
 
     let earned_count = badges.len();
     let total_count = rows.len();

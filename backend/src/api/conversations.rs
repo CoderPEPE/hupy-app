@@ -176,6 +176,9 @@ async fn add_message(
             "message text too long (max 4000 chars)",
         ));
     }
+    if body.kind.as_deref().is_some_and(|k| k.len() > 64) {
+        return Err(AppError::bad_request("kind too long (max 64 chars)"));
+    }
     repositories::conversations::find_owned(&state.pool, user_id, id).await?;
 
     let msg = repositories::conversations::insert_message(

@@ -16,6 +16,13 @@ use uuid::Uuid;
 /// elsewhere; `mastery` is always the computed average, never written directly.
 pub const BUMPABLE_METRICS: [&str; 4] = ["pronunciation", "conversation", "listening", "review"];
 
+/// The largest delta `POST /planets/:id/progress` accepts per call. The live
+/// tutor's tool schema grades each turn at 0.03–0.15 (see the realtime
+/// prompt), so anything larger is a hand-crafted request — allowing the old
+/// ±1.0 would let four calls max out every metric and unlock the whole course
+/// in as many seconds.
+pub const MAX_BUMP_DELTA: f64 = 0.15;
+
 /// `mastery` is never set directly: it is always the average of the other 6
 /// tracked metrics, recomputed every time one of them changes.
 pub fn compute_mastery(p: &PlanetProgress) -> f64 {

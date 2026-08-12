@@ -157,6 +157,9 @@ async fn create_flashcard(
     {
         return Err(AppError::bad_request("structure fields too long"));
     }
+    if body.source.as_deref().is_some_and(|s| s.len() > 32) {
+        return Err(AppError::bad_request("source too long (max 32 chars)"));
+    }
 
     let card = repositories::flashcards::insert(
         &state.pool,

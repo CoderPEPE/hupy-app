@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { useT } from '../i18n';
 import { colors, radius, shadows } from '../theme';
 
 function GoogleMark({ size }: { size: number }) {
@@ -65,6 +66,7 @@ export function SocialAuthRow({
   onPress?: (provider: Provider) => void;
   providers?: Provider[];
 }) {
+  const t = useT();
   return (
     <View style={styles.row}>
       {providers.map((p) => (
@@ -73,7 +75,9 @@ export function SocialAuthRow({
           style={styles.button}
           onPress={() => onPress?.(p)}
           accessibilityRole="button"
-          accessibilityLabel={`Continue with ${p}`}
+          accessibilityLabel={t('auth.login.continueWithProvider', {
+            provider: p.charAt(0).toUpperCase() + p.slice(1),
+          })}
         >
           {MARKS[p](18)}
         </Pressable>

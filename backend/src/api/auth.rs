@@ -186,6 +186,18 @@ async fn register(
     ))
 }
 
+/// A valid Argon2 hash of a throwaway password, generated on first use. When
+/// the email doesn't exist we verify against this instead of returning early,
+/// so "unknown account" and "wrong password" cost the same Argon2 run and the
+/// endpoint can't be used to enumerate which accounts exist.
+static DUMMY_HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+fn dummy_hash() -> &'static str {
+    DUMMY_HASH.get_or_init(|| {
+        password::hash_password("timing-equalizer").expect("argon2 hashing must not fail")
+    })
+}
+
 async fn login(
     State(state): State<AppState>,
     Json(body): Json<AuthRequest>,
@@ -194,10 +206,16 @@ async fn login(
 
     let found = repositories::users::find_by_email(&state.pool, &email).await?;
 
-    let user = match found {
-        Some(u) if password::verify_password(&body.password, &u.password_hash) => u,
-        _ => return Err(AppError::unauthorized("Invalid email or password")),
+    // Exactly one Argon2 verification on every path (real hash when the
+    // account exists, the dummy hash otherwise), so the response time does
+    // not reveal whether an email is registered.
+    let Some(user) = found else {
+        password::verify_password(&body.password, dummy_hash());
+        return Err(AppError::unauthorized("Invalid email or password"));
     };
+    if !password::verify_password(&body.password, &user.password_hash) {
+        return Err(AppError::unauthorized("Invalid email or password"));
+    }
 
     let token = jwt::create_token(state.jwt_secret(), user.id)
         .map_err(|e| AppError::internal(format!("failed to create token: {e}")))?;
@@ -314,4 +332,70 @@ async fn set_voice(
         .ok_or_else(|| AppError::unauthorized("User no longer exists"))?;
 
     Ok(Json(user.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_language_accepts_only_the_three_courses() {
+        for good in ["en", "es", "pt"] {
+            assert!(validate_language(good).is_ok(), "{good}");
+        }
+        for bad in ["", "fr", "EN", "english", "es ", "pt-PT"] {
+            assert!(validate_language(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn resolve_course_pair_defaults_the_base_from_the_target() {
+        assert_eq!(resolve_course_pair(&None, "en").unwrap(), ("pt".into(), "en".into()));
+        assert_eq!(resolve_course_pair(&None, "es").unwrap(), ("pt".into(), "es".into()));
+        assert_eq!(resolve_course_pair(&None, "pt").unwrap(), ("en".into(), "pt".into()));
+    }
+
+    #[test]
+    fn resolve_course_pair_rejects_base_equals_target() {
+        assert!(resolve_course_pair(&Some("en".into()), "en").is_err());
+        assert!(resolve_course_pair(&Some("pt".into()), "pt").is_err());
+        assert!(resolve_course_pair(&Some("es".into()), "es").is_err());
+    }
+
+    #[test]
+    fn resolve_course_pair_trims_and_lowercases_the_base() {
+        // The base is normalized; the target is validated as sent (callers
+        // pass it lowercase).
+        let pair = resolve_course_pair(&Some("  PT ".into()), "en").unwrap();
+        assert_eq!(pair, ("pt".into(), "en".into()));
+    }
+
+    #[test]
+    fn credentials_need_a_real_email() {
+        assert!(validate_credentials("", "password123").is_err());
+        assert!(validate_credentials("no-at-sign", "password123").is_err());
+        assert!(validate_credentials("no-dot@example", "password123").is_err());
+        assert!(validate_credentials("ok@example.com", "password123").is_ok());
+    }
+
+    #[test]
+    fn credentials_enforce_password_bounds() {
+        assert!(validate_credentials("a@b.co", "short").is_err());
+        assert!(validate_credentials("a@b.co", &"x".repeat(129)).is_err());
+        assert!(validate_credentials("a@b.co", &"x".repeat(128)).is_ok());
+    }
+
+    #[test]
+    fn email_length_is_capped() {
+        let mut long = "a".repeat(250);
+        long.push_str("@example.com");
+        assert!(validate_credentials(&long, "password123").is_err());
+    }
+
+    #[test]
+    fn name_length_is_capped() {
+        assert!(validate_name("").is_ok());
+        assert!(validate_name(&"a".repeat(120)).is_ok());
+        assert!(validate_name(&"a".repeat(121)).is_err());
+    }
 }
