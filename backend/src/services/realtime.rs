@@ -225,8 +225,7 @@ pub async fn build_session(pool: &DbPool, user_id: Uuid) -> Result<TutorSession>
         .map(|u| (u.base_language.clone(), u.language.clone()))
         .unwrap_or_else(|| ("pt".into(), "en".into()));
     let (target_name, base_name) = language_names(&base_language, &language);
-    let instructions =
-        build_instructions_for(pool, user_id, &base_language, &language).await?;
+    let instructions = build_instructions_for(pool, user_id, &base_language, &language).await?;
     // A voice stored before the catalog shrank (e.g. "onyx") would 400 the
     // whole session, so anything not in the catalog falls back to the course
     // default.

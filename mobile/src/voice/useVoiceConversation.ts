@@ -464,8 +464,38 @@ async function ensureMicPermission(): Promise<boolean> {
         break;
 
       case 'error':
-        // Recoverable API errors (e.g. rejected session.update) shouldn't kill the session.
-        if (__DEV__) console.warn('[voice] realtime error', msg.error?.message ?? msg.type);
+        // If the session never started (e.g. the server rejected our
+        // session.update — bad voice, oversized instructions), an error
+        // event is the only signal we get; surface it instead of hanging
+        // forever in 'connecting'. Mid-session errors are recoverable and
+        // only logged.
+        if (statusRef.current === 'connecting') {
+          // The session never started — nothing to keep open: drop the
+          // socket now (the next start() would clean it up anyway, but a
+          // dead session shouldn't sit on an open connection).
+          realtimeAudioPlayer.setSessionActive(false);
+          const ws = wsRef.current;
+          wsRef.current = null;
+          if (ws) {
+            ws.onopen = null;
+            ws.onmessage = null;
+            ws.onerror = null;
+            ws.onclose = null;
+            try {
+              ws.close();
+            } catch {
+              // ignore
+            }
+          }
+          setError(
+            msg.error?.message
+              ? t('voice.sessionError', { message: msg.error.message })
+              : t('voice.sessionEnded'),
+          );
+          setConversationStatus('error');
+        } else if (__DEV__) {
+          console.warn('[voice] realtime error', msg.error?.message ?? msg.type);
+        }
         break;
 
       default:

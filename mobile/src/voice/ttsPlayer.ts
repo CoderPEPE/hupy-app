@@ -62,15 +62,18 @@ class SpeechPlayer {
       const duration = buffer.duration;
       return await new Promise<number>((resolve) => {
         let settled = false;
+        // Safety net in case onEnded never fires; cleared once either path
+        // settles so no orphaned timer outlives the clip.
+        let timer: ReturnType<typeof setTimeout> | undefined;
         const finish = () => {
           if (settled) return;
           settled = true;
+          if (timer) clearTimeout(timer);
           this.sources.delete(source);
           resolve(duration);
         };
         source.onEnded = finish;
-        // Safety net in case onEnded never fires.
-        setTimeout(finish, duration * 1000 + 500);
+        timer = setTimeout(finish, duration * 1000 + 500);
         source.start();
         this.sources.add(source);
       });

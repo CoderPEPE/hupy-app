@@ -7,7 +7,7 @@
 //! `migrations/2026-08-11-000010_achievements`.
 
 use crate::db::{run_db, DbPool};
-use crate::errors::Result;
+use crate::errors::{AppError, Result};
 use crate::models::UserStats;
 use crate::schema::{
     badges, card_reviews, conversations, corrections, flashcards, messages, planets, user_badges,
@@ -15,6 +15,7 @@ use crate::schema::{
 };
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::Connection;
 use diesel::OptionalExtension;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -206,65 +207,88 @@ async fn touch_activity_and_award_xp_inner(
     let today = Utc::now().date_naive();
 
     run_db(pool, move |conn| {
-        let current = user_stats::table
-            .find(user_id)
-            .first::<UserStats>(conn)
-            .optional()?
-            .unwrap_or_else(|| UserStats::empty(user_id));
-
-        let streak_days = match current.last_active_date {
-            Some(last) if last == today => current.streak_days.max(1),
-            Some(last) if last == today.pred_opt().unwrap_or(today) => current.streak_days + 1,
-            _ => 1,
-        };
-        let longest_streak = current.longest_streak.max(streak_days);
-        let xp = current.xp + xp_delta;
-
-        let stats = UserStats {
-            user_id,
-            xp,
-            streak_days,
-            longest_streak,
-            last_active_date: Some(today),
-            updated_at: Utc::now(),
-        };
-        write_stats(conn, &stats)?;
-
-        let metrics = compute_metrics(conn, user_id, &stats)?;
-        let rules = load_rules(conn)?;
-
-        // Award, then pay out only what was actually new: the insert reports
-        // the rows it created, so re-running never pays twice.
-        let mut reward = 0;
-        for rule in earned_rules(&rules, &metrics) {
-            let inserted = diesel::insert_into(user_badges::table)
-                .values((
-                    user_badges::user_id.eq(user_id),
-                    user_badges::badge_id.eq(rule.id),
-                ))
-                .on_conflict((user_badges::user_id, user_badges::badge_id))
-                .do_nothing()
-                .execute(conn)?;
-            if inserted > 0 {
-                reward += rule.xp_reward;
+        // The whole bookkeeping runs in one transaction with the stats row
+        // locked (`FOR UPDATE`), so two near-simultaneous events (parallel
+        // Realtime tool calls, multi-device sessions) serialize instead of
+        // lost-updating XP or a streak. A brand-new account is seeded with an
+        // empty row first so the lock always has a row to take.
+        conn.transaction::<_, AppError, _>(|conn| {
+            let exists = user_stats::table
+                .find(user_id)
+                .first::<UserStats>(conn)
+                .optional()?
+                .is_some();
+            if !exists {
+                // `do_nothing`: two simultaneous first-touches on a brand-new
+                // user race here — the second insert must be a no-op (and the
+                // FOR UPDATE read below then picks up the committed row)
+                // rather than a UniqueViolation that loses the touch.
+                diesel::insert_into(user_stats::table)
+                    .values(user_stats::user_id.eq(user_id))
+                    .on_conflict(user_stats::user_id)
+                    .do_nothing()
+                    .execute(conn)?;
             }
-        }
+            let current = user_stats::table
+                .find(user_id)
+                .for_update()
+                .first::<UserStats>(conn)?;
 
-        // Reward XP is applied after evaluation, so an XP achievement can't
-        // cascade into the next one within a single pass — the next activity
-        // picks it up. Deliberate: it keeps one action from chaining awards.
-        if reward > 0 {
-            write_stats(
-                conn,
-                &UserStats {
-                    xp: xp + reward,
-                    updated_at: Utc::now(),
-                    ..stats
-                },
-            )?;
-        }
+            let streak_days = match current.last_active_date {
+                Some(last) if last == today => current.streak_days.max(1),
+                Some(last) if last == today.pred_opt().unwrap_or(today) => current.streak_days + 1,
+                _ => 1,
+            };
+            let longest_streak = current.longest_streak.max(streak_days);
+            let xp = current.xp + xp_delta;
 
-        Ok(())
+            let stats = UserStats {
+                user_id,
+                xp,
+                streak_days,
+                longest_streak,
+                last_active_date: Some(today),
+                updated_at: Utc::now(),
+            };
+            write_stats(conn, &stats)?;
+
+            let metrics = compute_metrics(conn, user_id, &stats)?;
+            let rules = load_rules(conn)?;
+
+            // Award, then pay out only what was actually new: the insert
+            // reports the rows it created, so re-running never pays twice.
+            let mut reward = 0;
+            for rule in earned_rules(&rules, &metrics) {
+                let inserted = diesel::insert_into(user_badges::table)
+                    .values((
+                        user_badges::user_id.eq(user_id),
+                        user_badges::badge_id.eq(rule.id),
+                    ))
+                    .on_conflict((user_badges::user_id, user_badges::badge_id))
+                    .do_nothing()
+                    .execute(conn)?;
+                if inserted > 0 {
+                    reward += rule.xp_reward;
+                }
+            }
+
+            // Reward XP is applied after evaluation, so an XP achievement
+            // can't cascade into the next one within a single pass — the
+            // next activity picks it up. Deliberate: it keeps one action
+            // from chaining awards.
+            if reward > 0 {
+                write_stats(
+                    conn,
+                    &UserStats {
+                        xp: xp + reward,
+                        updated_at: Utc::now(),
+                        ..stats
+                    },
+                )?;
+            }
+
+            Ok(())
+        })
     })
     .await
 }
@@ -340,7 +364,10 @@ mod tests {
 
     #[test]
     fn unknown_metrics_never_award() {
-        let rules = vec![rule("not_a_metric", 1, None), rule("planet_lessons", 1, None)];
+        let rules = vec![
+            rule("not_a_metric", 1, None),
+            rule("planet_lessons", 1, None),
+        ];
         let m = Metrics {
             corrections: 999,
             ..Default::default()

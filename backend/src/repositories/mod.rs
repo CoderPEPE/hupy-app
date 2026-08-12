@@ -11,6 +11,7 @@ pub mod conversations;
 pub mod flashcards;
 pub mod gamification;
 pub mod planets;
+pub mod refresh_tokens;
 pub mod tts;
 pub mod users;
 pub mod voices;

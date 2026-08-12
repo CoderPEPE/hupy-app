@@ -61,6 +61,20 @@ fn rate_limited() -> Response {
         .into_response()
 }
 
+/// The shared guard body: one `allow()` against the given limiter, keyed by
+/// the caller's socket IP.
+async fn enforce(
+    limiter: &RateLimiter,
+    addr: &SocketAddr,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !limiter.allow(&addr.ip().to_string()) {
+        return rate_limited();
+    }
+    next.run(request).await
+}
+
 /// Guards /api/auth/* (login + register) and the realtime token minting
 /// endpoint against brute-force attempts.
 pub async fn auth_ratelimit(
@@ -69,10 +83,19 @@ pub async fn auth_ratelimit(
     request: Request,
     next: Next,
 ) -> Response {
-    if !state.auth_limiter.allow(&addr.ip().to_string()) {
-        return rate_limited();
-    }
-    next.run(request).await
+    enforce(&state.auth_limiter, &addr, request, next).await
+}
+
+/// Guards the learning write endpoints (conversations, flashcards, planets)
+/// against scripted floods — one shared per-IP budget, so abuse that hops
+/// between endpoints still hits the same cap.
+pub async fn write_ratelimit(
+    State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Response {
+    enforce(&state.write_limiter, &addr, request, next).await
 }
 
 /// Guards /api/tts so a single account can't burn OpenAI credits at will.
@@ -82,10 +105,7 @@ pub async fn tts_ratelimit(
     request: Request,
     next: Next,
 ) -> Response {
-    if !state.tts_limiter.allow(&addr.ip().to_string()) {
-        return rate_limited();
-    }
-    next.run(request).await
+    enforce(&state.tts_limiter, &addr, request, next).await
 }
 
 #[cfg(test)]

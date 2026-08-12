@@ -16,8 +16,10 @@ pub fn cache_key(text: &str, voice: &str, model: &str, speed: f32) -> String {
 }
 
 /// Generates MP3 audio for `text` via the OpenAI speech API. The API key
-/// never leaves the server.
+/// never leaves the server. Uses the shared, timeout-bounded HTTP client so
+/// a hung upstream fails the request instead of holding a handler forever.
 pub async fn synthesize(
+    client: &reqwest::Client,
     api_key: &str,
     text: &str,
     voice: &str,
@@ -32,7 +34,6 @@ pub async fn synthesize(
         "response_format": "mp3",
     });
 
-    let client = reqwest::Client::new();
     let resp = client
         .post("https://api.openai.com/v1/audio/speech")
         .bearer_auth(api_key)

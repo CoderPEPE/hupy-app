@@ -28,10 +28,7 @@ pub async fn list(pool: &DbPool) -> Result<Vec<TutorVoice>> {
 pub async fn exists(pool: &DbPool, id: &str) -> Result<bool> {
     let id = id.to_string();
     run_db(pool, move |conn| {
-        Ok(diesel::select(diesel::dsl::exists(
-            tutor_voices::table.find(id),
-        ))
-        .get_result(conn)?)
+        Ok(diesel::select(diesel::dsl::exists(tutor_voices::table.find(id))).get_result(conn)?)
     })
     .await
 }

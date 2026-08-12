@@ -79,11 +79,19 @@ async fn tts(
     }
 
     // 2) Generate via OpenAI.
-    let bytes =
-        services::tts::synthesize(state.openai_api_key(), &text, &voice, &model, speed).await?;
+    let bytes = services::tts::synthesize(
+        &state.http_client,
+        state.openai_api_key(),
+        &text,
+        &voice,
+        &model,
+        speed,
+    )
+    .await?;
 
     // 3) Cache for next time (best-effort — a cache write failure must not
-    //    fail the request the user already waited for).
+    //    fail the request the user already waited for). Old entries are
+    //    pruned here too, keeping the cache bounded.
     if let Err(e) = repositories::tts::store_audio(
         &state.pool,
         key,
@@ -92,6 +100,7 @@ async fn tts(
         model,
         f64::from(speed),
         bytes.clone(),
+        state.config.tts_cache_max_age_days,
     )
     .await
     {

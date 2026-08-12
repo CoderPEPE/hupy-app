@@ -25,8 +25,9 @@ pub struct Planet {
 }
 
 /// A user's per-planet progress row. `mastery` is always the computed average
-/// of the six sub-metrics — never written directly.
-#[derive(Debug, Queryable, Selectable)]
+/// of the six sub-metrics — never written directly. `Clone` lets writers
+/// apply [`crate::services::planets::with_metric`] to a locked copy.
+#[derive(Debug, Clone, Queryable, Selectable)]
 #[diesel(table_name = user_planet_progress)]
 pub struct PlanetProgress {
     #[allow(dead_code)] // owned implicitly via the composite key on the row
@@ -138,12 +139,30 @@ mod tests {
     #[test]
     fn sentence_texts_cover_all_six_pairs() {
         let s = sample();
-        assert_eq!(sentence_texts(&s, "en", "pt"), ("Good morning".into(), "Bom dia".into()));
-        assert_eq!(sentence_texts(&s, "es", "pt"), ("Buenos días".into(), "Bom dia".into()));
-        assert_eq!(sentence_texts(&s, "pt", "en"), ("Bom dia".into(), "Good morning".into()));
-        assert_eq!(sentence_texts(&s, "en", "es"), ("Good morning".into(), "Buenos días".into()));
-        assert_eq!(sentence_texts(&s, "es", "en"), ("Buenos días".into(), "Good morning".into()));
-        assert_eq!(sentence_texts(&s, "pt", "es"), ("Bom dia".into(), "Buenos días".into()));
+        assert_eq!(
+            sentence_texts(&s, "en", "pt"),
+            ("Good morning".into(), "Bom dia".into())
+        );
+        assert_eq!(
+            sentence_texts(&s, "es", "pt"),
+            ("Buenos días".into(), "Bom dia".into())
+        );
+        assert_eq!(
+            sentence_texts(&s, "pt", "en"),
+            ("Bom dia".into(), "Good morning".into())
+        );
+        assert_eq!(
+            sentence_texts(&s, "en", "es"),
+            ("Good morning".into(), "Buenos días".into())
+        );
+        assert_eq!(
+            sentence_texts(&s, "es", "en"),
+            ("Buenos días".into(), "Good morning".into())
+        );
+        assert_eq!(
+            sentence_texts(&s, "pt", "es"),
+            ("Bom dia".into(), "Buenos días".into())
+        );
     }
 
     #[test]

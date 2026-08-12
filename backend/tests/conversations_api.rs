@@ -31,7 +31,15 @@ async fn create_list_detail_delete_lifecycle() {
     let conv_id = body["id"].as_str().unwrap().to_string();
 
     // List shows it with zero messages.
-    let (status, list) = request(&app, "GET", "/api/conversations", Some(&token), None, "10.0.10.2").await;
+    let (status, list) = request(
+        &app,
+        "GET",
+        "/api/conversations",
+        Some(&token),
+        None,
+        "10.0.10.2",
+    )
+    .await;
     assert_eq!(status.as_u16(), 200, "{list}");
     assert_eq!(list.as_array().unwrap().len(), 1);
     assert_eq!(list[0]["message_count"], 0);
@@ -67,19 +75,40 @@ async fn create_list_detail_delete_lifecycle() {
     .await;
     assert_eq!(status.as_u16(), 201);
 
-    let (status, detail) =
-        request(&app, "GET", &format!("/api/conversations/{conv_id}"), Some(&token), None, "10.0.10.5").await;
+    let (status, detail) = request(
+        &app,
+        "GET",
+        &format!("/api/conversations/{conv_id}"),
+        Some(&token),
+        None,
+        "10.0.10.5",
+    )
+    .await;
     assert_eq!(status.as_u16(), 200, "{detail}");
     assert_eq!(detail["messages"].as_array().unwrap().len(), 2);
     assert_eq!(detail["corrections"].as_array().unwrap().len(), 1);
     assert_eq!(detail["corrections"][0]["corrected"], "I work every day.");
 
     // Delete and confirm it's gone.
-    let (status, _) =
-        request(&app, "DELETE", &format!("/api/conversations/{conv_id}"), Some(&token), None, "10.0.10.6").await;
+    let (status, _) = request(
+        &app,
+        "DELETE",
+        &format!("/api/conversations/{conv_id}"),
+        Some(&token),
+        None,
+        "10.0.10.6",
+    )
+    .await;
     assert_eq!(status.as_u16(), 204);
-    let (status, _) =
-        request(&app, "GET", &format!("/api/conversations/{conv_id}"), Some(&token), None, "10.0.10.7").await;
+    let (status, _) = request(
+        &app,
+        "GET",
+        &format!("/api/conversations/{conv_id}"),
+        Some(&token),
+        None,
+        "10.0.10.7",
+    )
+    .await;
     assert_eq!(status.as_u16(), 404);
 }
 
@@ -101,8 +130,15 @@ async fn conversations_are_private_to_their_owner() {
     let conv_id = body["id"].as_str().unwrap().to_string();
 
     // B cannot read, message, correct, or delete A's conversation.
-    let (status, body) =
-        request(&app, "GET", &format!("/api/conversations/{conv_id}"), Some(&token_b), None, "10.0.11.2").await;
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/conversations/{conv_id}"),
+        Some(&token_b),
+        None,
+        "10.0.11.2",
+    )
+    .await;
     assert_eq!(status.as_u16(), 404, "{body}");
 
     let (status, body) = request(
@@ -127,12 +163,27 @@ async fn conversations_are_private_to_their_owner() {
     .await;
     assert_eq!(status.as_u16(), 404, "{body}");
 
-    let (status, body) =
-        request(&app, "DELETE", &format!("/api/conversations/{conv_id}"), Some(&token_b), None, "10.0.11.5").await;
+    let (status, body) = request(
+        &app,
+        "DELETE",
+        &format!("/api/conversations/{conv_id}"),
+        Some(&token_b),
+        None,
+        "10.0.11.5",
+    )
+    .await;
     assert_eq!(status.as_u16(), 404, "{body}");
 
     // A's list still contains exactly one conversation, unmodified.
-    let (status, list) = request(&app, "GET", "/api/conversations", Some(&token_a), None, "10.0.11.6").await;
+    let (status, list) = request(
+        &app,
+        "GET",
+        "/api/conversations",
+        Some(&token_a),
+        None,
+        "10.0.11.6",
+    )
+    .await;
     assert_eq!(status.as_u16(), 200);
     assert_eq!(list.as_array().unwrap().len(), 1);
     assert_eq!(list[0]["title"], "Private to A");
@@ -218,7 +269,8 @@ async fn conversation_auto_titles_from_the_planet() {
     let (app, token) = setup().await;
 
     // Grab the first planet of the user's course.
-    let (status, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.13.1").await;
+    let (status, planets) =
+        request(&app, "GET", "/api/planets", Some(&token), None, "10.0.13.1").await;
     assert_eq!(status.as_u16(), 200, "{planets}");
     let planet_id = planets[0]["id"].as_str().unwrap().to_string();
     let planet_title = planets[0]["title"].as_str().unwrap().to_string();
@@ -233,6 +285,12 @@ async fn conversation_auto_titles_from_the_planet() {
     )
     .await;
     assert_eq!(status.as_u16(), 201, "{body}");
-    assert!(body["title"].as_str().unwrap().contains("Planet 1"), "{body}");
-    assert!(body["title"].as_str().unwrap().contains(&planet_title), "{body}");
+    assert!(
+        body["title"].as_str().unwrap().contains("Planet 1"),
+        "{body}"
+    );
+    assert!(
+        body["title"].as_str().unwrap().contains(&planet_title),
+        "{body}"
+    );
 }

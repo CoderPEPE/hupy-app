@@ -370,4 +370,5 @@ export const es: Translations = {
   'voice.couldNotStartSession': 'No se pudo iniciar la sesión',
   'voice.connectionLost': 'Se perdió la conexión. Revisa tu red e inténtalo de nuevo.',
   'voice.sessionEnded': 'La sesión terminó de forma inesperada.',
+  'voice.sessionError': 'Error de sesión: {{message}}',
 };

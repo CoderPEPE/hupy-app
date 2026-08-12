@@ -30,6 +30,20 @@ pub struct Config {
     /// Per-IP sliding-window limit for the TTS endpoint.
     pub tts_rate_max_requests: usize,
     pub tts_rate_window_secs: u64,
+    /// Per-IP sliding-window limit for the learning write endpoints
+    /// (conversations, flashcards, planet progress/sentence mastery) — a
+    /// single shared budget per IP across all of them.
+    pub write_rate_max_requests: usize,
+    pub write_rate_window_secs: u64,
+    /// How many days a generated audio clip stays in the cache before it is
+    /// pruned on the next cache write (keeps the cache bounded).
+    pub tts_cache_max_age_days: i64,
+    /// How long an access JWT stays valid. Short-lived by design: the client
+    /// transparently refreshes it via the rotating refresh token.
+    pub access_token_ttl_secs: i64,
+    /// How long a refresh token stays usable before the client must log in
+    /// again.
+    pub refresh_token_ttl_secs: i64,
 }
 
 impl Config {
@@ -78,6 +92,29 @@ impl Config {
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(60);
+        // A live tutor session fires a burst of mutations (corrections,
+        // flashcards, progress bumps), so the default is deliberately
+        // generous; it still caps scripted floods.
+        let write_rate_max_requests = env::var("WRITE_RATE_MAX")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(120);
+        let write_rate_window_secs = env::var("WRITE_RATE_WINDOW_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(60);
+        let tts_cache_max_age_days = env::var("TTS_CACHE_MAX_AGE_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+        let access_token_ttl_secs = env::var("ACCESS_TOKEN_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(900); // 15 minutes
+        let refresh_token_ttl_secs = env::var("REFRESH_TOKEN_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30 * 24 * 3600); // 30 days
 
         Ok(Self {
             database_url,
@@ -92,6 +129,11 @@ impl Config {
             auth_rate_window_secs,
             tts_rate_max_requests,
             tts_rate_window_secs,
+            write_rate_max_requests,
+            write_rate_window_secs,
+            tts_cache_max_age_days,
+            access_token_ttl_secs,
+            refresh_token_ttl_secs,
         })
     }
 }
@@ -105,7 +147,7 @@ mod tests {
     // they must never run concurrently with each other.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    const ALL_VARS: [&str; 12] = [
+    const ALL_VARS: [&str; 17] = [
         "DATABASE_URL",
         "JWT_SECRET",
         "OPENAI_API_KEY",
@@ -118,6 +160,11 @@ mod tests {
         "AUTH_RATE_WINDOW_SECS",
         "TTS_RATE_MAX",
         "TTS_RATE_WINDOW_SECS",
+        "WRITE_RATE_MAX",
+        "WRITE_RATE_WINDOW_SECS",
+        "TTS_CACHE_MAX_AGE_DAYS",
+        "ACCESS_TOKEN_TTL_SECS",
+        "REFRESH_TOKEN_TTL_SECS",
     ];
 
     /// Runs `f` with a locked environment, restoring every variable after.
@@ -177,6 +224,11 @@ mod tests {
                 assert_eq!(c.auth_rate_window_secs, 60);
                 assert_eq!(c.tts_rate_max_requests, 120);
                 assert_eq!(c.tts_rate_window_secs, 60);
+                assert_eq!(c.write_rate_max_requests, 120);
+                assert_eq!(c.write_rate_window_secs, 60);
+                assert_eq!(c.tts_cache_max_age_days, 30);
+                assert_eq!(c.access_token_ttl_secs, 900);
+                assert_eq!(c.refresh_token_ttl_secs, 30 * 24 * 3600);
             },
         );
     }
@@ -196,6 +248,11 @@ mod tests {
                 env::set_var("AUTH_RATE_WINDOW_SECS", "10");
                 env::set_var("TTS_RATE_MAX", "2");
                 env::set_var("TTS_RATE_WINDOW_SECS", "7");
+                env::set_var("WRITE_RATE_MAX", "25");
+                env::set_var("WRITE_RATE_WINDOW_SECS", "30");
+                env::set_var("TTS_CACHE_MAX_AGE_DAYS", "14");
+                env::set_var("ACCESS_TOKEN_TTL_SECS", "300");
+                env::set_var("REFRESH_TOKEN_TTL_SECS", "86400");
             },
             || {
                 let c = Config::from_env().unwrap();
@@ -208,6 +265,11 @@ mod tests {
                 assert_eq!(c.auth_rate_window_secs, 10);
                 assert_eq!(c.tts_rate_max_requests, 2);
                 assert_eq!(c.tts_rate_window_secs, 7);
+                assert_eq!(c.write_rate_max_requests, 25);
+                assert_eq!(c.write_rate_window_secs, 30);
+                assert_eq!(c.tts_cache_max_age_days, 14);
+                assert_eq!(c.access_token_ttl_secs, 300);
+                assert_eq!(c.refresh_token_ttl_secs, 86400);
             },
         );
     }

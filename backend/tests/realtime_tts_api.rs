@@ -24,15 +24,31 @@ async fn realtime_client_secret_requires_auth_and_config() {
     let token = register(&app, &unique_email("rt")).await;
 
     // No token -> 401 before anything else.
-    let (status, body) = request(&app, "POST", "/api/realtime/client-secret", None, None, "10.0.51.1").await;
+    let (status, body) = request(
+        &app,
+        "POST",
+        "/api/realtime/client-secret",
+        None,
+        None,
+        "10.0.51.1",
+    )
+    .await;
     assert_eq!(status.as_u16(), 401, "{body}");
 
-    // Authenticated, but the server has no OPENAI_API_KEY -> clean 500 that
-    // names the missing configuration (never a panic, never a leak).
-    let (status, body) =
-        request(&app, "POST", "/api/realtime/client-secret", Some(&token), None, "10.0.51.2").await;
+    // Authenticated, but the server has no OPENAI_API_KEY -> clean 500 with
+    // a generic body (the missing configuration is logged server-side, never
+    // echoed to clients).
+    let (status, body) = request(
+        &app,
+        "POST",
+        "/api/realtime/client-secret",
+        Some(&token),
+        None,
+        "10.0.51.2",
+    )
+    .await;
     assert_eq!(status.as_u16(), 500, "{body}");
-    assert!(body["error"].as_str().unwrap().contains("OPENAI_API_KEY"), "{body}");
+    assert_eq!(body["error"], "internal server error", "{body}");
 }
 
 #[tokio::test]
@@ -150,7 +166,8 @@ async fn voices_catalog_serves_the_seeded_voices() {
     let app = app(30, 120);
     let token = register(&app, &unique_email("voice")).await;
 
-    let (status, voices) = request(&app, "GET", "/api/voices", Some(&token), None, "10.0.54.1").await;
+    let (status, voices) =
+        request(&app, "GET", "/api/voices", Some(&token), None, "10.0.54.1").await;
     assert_eq!(status.as_u16(), 200, "{voices}");
     let voices = voices.as_array().unwrap();
     assert!(voices.len() >= 10, "{voices:?}");

@@ -41,7 +41,8 @@ pub const TEST_SECRET: &str = "integration-test-secret-0123456789abcdef";
 /// `planet_lessons`/`lesson_steps`/`badges`/`tutor_voices` stay (they are the
 /// seeded course content every test reads).
 const USER_TABLES: &str = "users, conversations, messages, corrections, flashcards, \
-     card_reviews, user_stats, user_badges, user_planet_progress, user_sentence_progress, tts_audio";
+     card_reviews, user_stats, user_badges, user_planet_progress, user_sentence_progress, \
+     tts_audio, refresh_tokens";
 
 /// The shared test pool: the per-binary database is created on first use,
 /// migrations run once per process, then the user tables are truncated so
@@ -133,8 +134,21 @@ pub fn truncate(pool: &DbPool) {
 }
 
 /// Builds a fresh router with fresh rate limiters — rate-limit tests get a
-/// deterministic per-test budget by tuning the two `max` parameters.
+/// deterministic per-test budget by tuning the `max` parameters. The write
+/// budget defaults to the production value; tests that exercise the write
+/// limit use [`app_with_limits`].
+///
+/// `allow(dead_code)`: every test binary compiles this module separately,
+/// and the write-limit suite only uses [`app_with_limits`], leaving `app`
+/// unreferenced there.
+#[allow(dead_code)]
 pub fn app(auth_rate_max: usize, tts_rate_max: usize) -> Router {
+    app_with_limits(auth_rate_max, tts_rate_max, 120)
+}
+
+/// Like [`app`] but with an explicit write-endpoint (conversations,
+/// flashcards, planets) budget.
+pub fn app_with_limits(auth_rate_max: usize, tts_rate_max: usize, write_rate_max: usize) -> Router {
     let config = Config {
         database_url: String::new(), // the router never connects directly
         jwt_secret: TEST_SECRET.into(),
@@ -148,6 +162,11 @@ pub fn app(auth_rate_max: usize, tts_rate_max: usize) -> Router {
         auth_rate_window_secs: 60,
         tts_rate_max_requests: tts_rate_max,
         tts_rate_window_secs: 60,
+        write_rate_max_requests: write_rate_max,
+        write_rate_window_secs: 60,
+        tts_cache_max_age_days: 30,
+        access_token_ttl_secs: 900,
+        refresh_token_ttl_secs: 30 * 24 * 3600,
     };
     let state = AppState::new(config, pool().clone());
     huppy_backend::build_router(state)
@@ -165,7 +184,10 @@ pub async fn register(app: &Router, email: &str) -> String {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "register {email}: {body}");
-    body["token"].as_str().expect("token in register response").to_string()
+    body["token"]
+        .as_str()
+        .expect("token in register response")
+        .to_string()
 }
 
 /// An email no other test can collide with — process id + an atomic

@@ -2,16 +2,21 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const TOKEN_TTL_SECS: i64 = 30 * 24 * 3600; // 30 days
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     pub sub: Uuid,
     pub exp: usize,
 }
 
-pub fn create_token(secret: &str, user_id: Uuid) -> Result<String, jsonwebtoken::errors::Error> {
-    let exp = chrono::Utc::now().timestamp() + TOKEN_TTL_SECS;
+/// Mints an access JWT valid for `ttl_secs` from now. The TTL is
+/// configurable so production can run short-lived access tokens (refreshed
+/// transparently by the client) without changing code.
+pub fn create_token(
+    secret: &str,
+    user_id: Uuid,
+    ttl_secs: i64,
+) -> Result<String, jsonwebtoken::errors::Error> {
+    let exp = chrono::Utc::now().timestamp() + ttl_secs;
     let claims = Claims {
         sub: user_id,
         exp: exp as usize,
@@ -49,15 +54,27 @@ mod tests {
     #[test]
     fn roundtrips_a_token() {
         let id = Uuid::new_v4();
-        let token = create_token(SECRET, id).unwrap();
+        let token = create_token(SECRET, id, 3600).unwrap();
         let decoded = decode_token(SECRET, &token).unwrap();
         assert_eq!(decoded.sub, id);
         assert!(decoded.exp > chrono::Utc::now().timestamp() as usize);
     }
 
     #[test]
+    fn honors_the_requested_ttl() {
+        let id = Uuid::new_v4();
+        let token = create_token(SECRET, id, 60).unwrap();
+        let decoded = decode_token(SECRET, &token).unwrap();
+        let remaining = decoded.exp as i64 - chrono::Utc::now().timestamp();
+        assert!(
+            remaining <= 60,
+            "expires at most {remaining}s in the future"
+        );
+    }
+
+    #[test]
     fn rejects_a_tampered_signature() {
-        let token = create_token(SECRET, Uuid::new_v4()).unwrap();
+        let token = create_token(SECRET, Uuid::new_v4(), 3600).unwrap();
         let mut bytes = token.into_bytes();
         let last = bytes.last_mut().unwrap();
         *last = if *last == b'A' { b'B' } else { b'A' };
@@ -66,7 +83,7 @@ mod tests {
 
     #[test]
     fn rejects_a_token_signed_with_a_different_secret() {
-        let token = create_token(SECRET, Uuid::new_v4()).unwrap();
+        let token = create_token(SECRET, Uuid::new_v4(), 3600).unwrap();
         assert!(decode_token("a-completely-different-secret-value!", &token).is_err());
     }
 
@@ -101,4 +118,3 @@ mod tests {
         assert!(decode_token(SECRET, &token).is_err());
     }
 }
-

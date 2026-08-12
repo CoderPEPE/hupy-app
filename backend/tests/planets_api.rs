@@ -18,7 +18,8 @@ async fn setup() -> (common::Router, String) {
 async fn list_is_scoped_to_the_users_course() {
     let (app, token) = setup().await;
 
-    let (status, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.30.1").await;
+    let (status, planets) =
+        request(&app, "GET", "/api/planets", Some(&token), None, "10.0.30.1").await;
     assert_eq!(status.as_u16(), 200, "{planets}");
     let planets = planets.as_array().unwrap();
 
@@ -29,7 +30,11 @@ async fn list_is_scoped_to_the_users_course() {
     // First planet active, the rest locked behind it.
     assert_eq!(planets[0]["status"], "active");
     for p in planets.iter().skip(1) {
-        assert_eq!(p["status"], "locked", "planet {} must start locked", p["number"]);
+        assert_eq!(
+            p["status"], "locked",
+            "planet {} must start locked",
+            p["number"]
+        );
     }
 }
 
@@ -56,10 +61,20 @@ async fn detail_returns_sentences_and_lesson_path() {
     let (_, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.32.1").await;
     let planet_id = planets[0]["id"].as_str().unwrap().to_string();
 
-    let (status, detail) =
-        request(&app, "GET", &format!("/api/planets/{planet_id}"), Some(&token), None, "10.0.32.2").await;
+    let (status, detail) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{planet_id}"),
+        Some(&token),
+        None,
+        "10.0.32.2",
+    )
+    .await;
     assert_eq!(status.as_u16(), 200, "{detail}");
-    assert!(detail["sentences"].as_array().unwrap().len() >= 40, "{detail}");
+    assert!(
+        detail["sentences"].as_array().unwrap().len() >= 40,
+        "{detail}"
+    );
     assert_eq!(detail["lessons"].as_array().unwrap().len(), 4);
     assert_eq!(detail["lessons"][0]["kind"], "learn");
     assert!(!detail["lessons"][0]["locked"].as_bool().unwrap());
@@ -144,8 +159,15 @@ async fn mastering_sentences_moves_the_sentences_metric() {
     let (app, token) = setup().await;
     let (_, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.34.1").await;
     let planet_id = planets[0]["id"].as_str().unwrap().to_string();
-    let (_, detail) =
-        request(&app, "GET", &format!("/api/planets/{planet_id}"), Some(&token), None, "10.0.34.2").await;
+    let (_, detail) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{planet_id}"),
+        Some(&token),
+        None,
+        "10.0.34.2",
+    )
+    .await;
     let sentence_id = detail["sentences"][0]["id"].as_str().unwrap().to_string();
     let total = detail["sentences"].as_array().unwrap().len();
 
@@ -165,8 +187,15 @@ async fn mastering_sentences_moves_the_sentences_metric() {
 
     // A sentence from another planet is not found in this one.
     let planet2 = planets[1]["id"].as_str().unwrap().to_string();
-    let (_, detail2) =
-        request(&app, "GET", &format!("/api/planets/{planet2}"), Some(&token), None, "10.0.34.4").await;
+    let (_, detail2) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{planet2}"),
+        Some(&token),
+        None,
+        "10.0.34.4",
+    )
+    .await;
     let foreign_sentence = detail2["sentences"][0]["id"].as_str().unwrap().to_string();
     let (status, body) = request(
         &app,
@@ -210,8 +239,15 @@ async fn completing_planet_one_unlocks_planet_two() {
     }
 
     // Master every sentence of planet 1.
-    let (_, detail) =
-        request(&app, "GET", &format!("/api/planets/{p1}"), Some(&token), None, "10.0.35.3").await;
+    let (_, detail) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{p1}"),
+        Some(&token),
+        None,
+        "10.0.35.3",
+    )
+    .await;
     for s in detail["sentences"].as_array().unwrap() {
         let sid = s["id"].as_str().unwrap();
         let (status, _) = request(
@@ -260,8 +296,15 @@ async fn completing_planet_one_unlocks_planet_two() {
     assert_eq!(status.as_u16(), 200);
 
     // All six metrics are now >= 0.8 (mastery ~0.87) -> planet 2 is active.
-    let (status, body) =
-        request(&app, "GET", &format!("/api/planets/{p2}"), Some(&token), None, "10.0.35.8").await;
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{p2}"),
+        Some(&token),
+        None,
+        "10.0.35.8",
+    )
+    .await;
     assert_eq!(status.as_u16(), 200, "{body}");
     assert_eq!(body["status"], "active", "{body}");
 }

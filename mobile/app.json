@@ -8,6 +8,11 @@
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": true,
+      "entitlements": {
+        "keychain-access-groups": [
+          "$(AppIdentifierPrefix)com.conjuntos.huppy"
+        ]
+      },
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Huppy uses the microphone so you can practice speaking English with your AI tutor.",
         "UIBackgroundModes": [
@@ -20,6 +25,7 @@
       "bundleIdentifier": "com.conjuntos.huppy"
     },
     "android": {
+      "allowBackup": false,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -43,7 +49,9 @@
             "usesCleartextTraffic": true
           }
         }
-      ]
+      ],
+      "expo-secure-store",
+      "expo-dev-client"
     ]
   }
 }

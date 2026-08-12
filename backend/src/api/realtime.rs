@@ -84,8 +84,8 @@ async fn client_secret(
         },
     };
 
-    let client = reqwest::Client::new();
-    let resp = client
+    let resp = state
+        .http_client
         .post("https://api.openai.com/v1/realtime/client_secrets")
         .bearer_auth(state.openai_api_key())
         .header("Content-Type", "application/json")

@@ -376,6 +376,7 @@ export const en = {
   'voice.couldNotStartSession': 'Could not start a session',
   'voice.connectionLost': 'Connection lost. Check your network and try again.',
   'voice.sessionEnded': 'The session ended unexpectedly.',
+  'voice.sessionError': 'Session error: {{message}}',
 } as const;
 
 /** The full string-value shape every locale dictionary must implement. */

@@ -371,4 +371,5 @@ export const ptBR: Translations = {
   'voice.couldNotStartSession': 'Não foi possível iniciar a sessão',
   'voice.connectionLost': 'Conexão perdida. Verifique sua rede e tente novamente.',
   'voice.sessionEnded': 'A sessão terminou inesperadamente.',
+  'voice.sessionError': 'Erro na sessão: {{message}}',
 };

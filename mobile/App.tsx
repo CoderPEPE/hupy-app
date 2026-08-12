@@ -10,6 +10,7 @@ import { GamificationCelebration } from './src/components/GamificationCelebratio
 import { OfflineScreen } from './src/components/OfflineScreen';
 import { translate, useI18nStore } from './src/i18n';
 import { RootNavigator } from './src/navigation/RootNavigator';
+import { initSecureStorage } from './src/storage';
 import { useAuthStore } from './src/store/auth';
 import { colors, radius, spacing } from './src/theme';
 
@@ -87,10 +88,53 @@ function ConnectivityGate({ children }: { children: ReactNode }) {
 export default function App() {
   const restore = useAuthStore((s) => s.restore);
   const token = useAuthStore((s) => s.token);
+  // If the secure-storage bootstrap fails (Keychain/Keystore unavailable),
+  // restore() never runs and the app would sit on the splash forever. Fail
+  // visibly with a retry instead — initSecureStorage is retryable by design.
+  const [bootError, setBootError] = useState<string | null>(null);
+  const [bootAttempt, setBootAttempt] = useState(0);
 
   useEffect(() => {
-    restore();
-  }, [restore]);
+    let cancelled = false;
+    (async () => {
+      // The credentials live in an MMKV encrypted with a device-bound key
+      // (iOS Keychain / Android Keystore). The store's restore() reads them,
+      // so the key must be loaded before anything touches auth state.
+      try {
+        await initSecureStorage();
+        if (!cancelled) restore();
+      } catch (error) {
+        if (!cancelled) {
+          setBootError(error instanceof Error ? error.message : String(error));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [restore, bootAttempt]);
+
+  if (bootError) {
+    return (
+      <GestureHandlerRootView style={styles.root}>
+        <SafeAreaProvider>
+          <View style={styles.crash}>
+            <Text style={styles.crashTitle}>{translate(useI18nStore.getState().locale, 'common.somethingWrong')}</Text>
+            <Text style={styles.crashBody}>{bootError}</Text>
+            <Pressable
+              style={styles.crashButton}
+              onPress={() => {
+                setBootError(null);
+                setBootAttempt((n) => n + 1);
+              }}
+            >
+              <Text style={styles.crashButtonText}>{translate(useI18nStore.getState().locale, 'common.tryAgain')}</Text>
+            </Pressable>
+          </View>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    );
+  }
 
   return (
     <GestureHandlerRootView style={styles.root}>

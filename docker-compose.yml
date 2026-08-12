@@ -1,0 +1,54 @@
+# Local production-style stack: Postgres + the Huppy API.
+#
+#   cp backend/.env.example .env   # then set real values
+#   docker compose up --build
+#
+# The API applies migrations on boot. For a first run against an empty
+# database, give Postgres a moment to become healthy before the API starts
+# (compose waits for the healthcheck below).
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-huppy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-huppy}
+      POSTGRES_DB: ${POSTGRES_DB:-huppy}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-huppy} -d ${POSTGRES_DB:-huppy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-huppy}:${POSTGRES_PASSWORD:-huppy}@db:5432/${POSTGRES_DB:-huppy}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env - openssl rand -hex 32}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PORT: "3000"
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      # TTS_CACHE_MAX_AGE_DAYS, AUTH_RATE_MAX, ACCESS_TOKEN_TTL_SECS, ... are
+      # read from the environment too — pass them through here if you want to
+      # tune them.
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    # The Dockerfile defines the HEALTHCHECK (GET /health); add a compose
+    # alias here so `docker compose ps` shows it even without a build.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  pgdata:

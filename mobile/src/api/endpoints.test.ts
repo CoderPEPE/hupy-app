@@ -52,6 +52,22 @@ describe('auth endpoints', () => {
     expect(lastCall()).toEqual(['/api/auth/me', { auth: true }]);
   });
 
+  it('refresh posts the refresh token without auth', async () => {
+    await authApi.refresh('rt-1');
+    expect(lastCall()).toEqual([
+      '/api/auth/refresh',
+      { method: 'POST', body: { refresh_token: 'rt-1' } },
+    ]);
+  });
+
+  it('logout posts the refresh token without auth', async () => {
+    await authApi.logout('rt-1');
+    expect(lastCall()).toEqual([
+      '/api/auth/logout',
+      { method: 'POST', body: { refresh_token: 'rt-1' } },
+    ]);
+  });
+
   it('setLanguage posts the pair with auth', async () => {
     await authApi.setLanguage('pt', 'en');
     expect(lastCall()).toEqual([

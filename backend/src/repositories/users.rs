@@ -3,8 +3,10 @@
 use crate::db::{run_db, DbPool};
 use crate::errors::{AppError, Result};
 use crate::models::{NewUser, User};
-use crate::schema::users;
+use crate::schema::{refresh_tokens, users};
+use chrono::{DateTime, Utc};
 use diesel::prelude::*;
+use diesel::Connection;
 use diesel::OptionalExtension;
 use uuid::Uuid;
 
@@ -26,27 +28,48 @@ pub async fn find_by_id(pool: &DbPool, user_id: Uuid) -> Result<Option<User>> {
     .await
 }
 
-/// Inserts a new user, rejecting duplicate emails.
-///
-/// The existence check and the insert run on the same connection inside one
-/// closure, so two racing registrations cannot both pass the check.
-pub async fn create(pool: &DbPool, new_user: &NewUser) -> Result<User> {
+/// Creates the account and its first refresh token in one transaction, so a
+/// failure issuing the session rolls the account back — the client must
+/// never receive a 500 for an account that actually exists (a retry would
+/// then 409 and strand the user). Duplicate emails are rejected inside the
+/// transaction, with the UNIQUE constraint as the backstop against racing
+/// registrations.
+pub async fn create_with_refresh_token(
+    pool: &DbPool,
+    new_user: &NewUser,
+    refresh_token_hash: &str,
+    family_id: Uuid,
+    expires_at: DateTime<Utc>,
+) -> Result<User> {
     let email = new_user.email.clone();
     let new_user = new_user.clone();
+    let (refresh_token_hash, family_id, expires_at) =
+        (refresh_token_hash.to_string(), family_id, expires_at);
     run_db(pool, move |conn| {
-        let existing = users::table
-            .filter(users::email.eq(&email))
-            .first::<User>(conn)
-            .optional()?;
-        if existing.is_some() {
-            return Err(AppError::conflict(
-                "An account with this email already exists",
-            ));
-        }
-        Ok(diesel::insert_into(users::table)
-            .values(&new_user)
-            .returning(User::as_returning())
-            .get_result(conn)?)
+        conn.transaction::<_, AppError, _>(|conn| {
+            let existing = users::table
+                .filter(users::email.eq(&email))
+                .first::<User>(conn)
+                .optional()?;
+            if existing.is_some() {
+                return Err(AppError::conflict(
+                    "An account with this email already exists",
+                ));
+            }
+            let user = diesel::insert_into(users::table)
+                .values(&new_user)
+                .returning(User::as_returning())
+                .get_result(conn)?;
+            diesel::insert_into(refresh_tokens::table)
+                .values((
+                    refresh_tokens::user_id.eq(user.id),
+                    refresh_tokens::token_hash.eq(&refresh_token_hash),
+                    refresh_tokens::family_id.eq(family_id),
+                    refresh_tokens::expires_at.eq(expires_at),
+                ))
+                .execute(conn)?;
+            Ok(user)
+        })
     })
     .await
 }

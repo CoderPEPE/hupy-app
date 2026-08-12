@@ -8,24 +8,35 @@ use crate::services;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::middleware;
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
+    // Per-IP anti-abuse cap on every mutating route (create, review,
+    // confirm, delete, correction-to-card), sharing one budget with
+    // conversations/planets writes. Reads stay unlimited.
+    let write = middleware::from_fn_with_state(
+        state.clone(),
+        crate::middleware::ratelimit::write_ratelimit,
+    );
     Router::new()
-        .route("/", get(list_flashcards).post(create_flashcard))
-        .route("/{id}", axum::routing::delete(delete_flashcard))
-        .route("/{id}/review", axum::routing::post(review_flashcard))
+        .route(
+            "/",
+            get(list_flashcards).merge(post(create_flashcard).layer(write.clone())),
+        )
+        .route("/{id}", delete(delete_flashcard).layer(write.clone()))
+        .route("/{id}/review", post(review_flashcard).layer(write.clone()))
         .route(
             "/{id}/confirm-live-mastery",
-            axum::routing::post(confirm_live_mastery),
+            post(confirm_live_mastery).layer(write.clone()),
         )
         .route(
             "/corrections/{correction_id}/flashcard",
-            axum::routing::post(correction_to_card),
+            post(correction_to_card).layer(write),
         )
 }
 

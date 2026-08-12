@@ -2,7 +2,7 @@ import type { User } from '../types';
 import { ApiError } from '../api/client';
 import { useAuthStore } from './auth';
 import { useI18nStore } from '../i18n';
-import { storage, StorageKeys } from '../storage';
+import { getSecureStorage, initSecureStorage, SecureKeys, storage, StorageKeys } from '../storage';
 
 // react-native-mmkv is stubbed globally in jest.setup.js.
 
@@ -12,6 +12,8 @@ jest.mock('../api/auth', () => ({
   login: jest.fn(),
   register: jest.fn(),
   me: jest.fn(),
+  refresh: jest.fn(),
+  logout: jest.fn().mockResolvedValue(undefined),
   setLanguage: jest.fn(),
   setVoice: jest.fn(),
   setName: jest.fn(),
@@ -36,8 +38,12 @@ const user = (overrides: Partial<User> = {}): User => ({
 });
 
 const resetStorage = () => {
-  [StorageKeys.authToken, StorageKeys.authUser, StorageKeys.baseLanguage, StorageKeys.targetLanguage, StorageKeys.tutorVoice].forEach(
-    (k) => storage.remove(k),
+  [StorageKeys.baseLanguage, StorageKeys.targetLanguage, StorageKeys.tutorVoice].forEach((k) =>
+    storage.remove(k),
+  );
+  const secure = getSecureStorage();
+  [SecureKeys.authToken, SecureKeys.refreshToken, SecureKeys.authUser].forEach((k) =>
+    secure.remove(k),
   );
 };
 
@@ -48,8 +54,11 @@ const resetStore = () =>
     initialized: false,
   });
 
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
+  // The store reads credentials from the encrypted MMKV; boot it like App.tsx
+  // does (its mock in jest.setup.js is deterministic).
+  await initSecureStorage();
   resetStorage();
   resetStore();
   // persistUser() also switches the module-level i18n locale (and writes
@@ -68,7 +77,7 @@ describe('restore', () => {
   });
 
   it('refreshes the stored user from the backend when a token exists', async () => {
-    storage.set(StorageKeys.authToken, 'token-1');
+    getSecureStorage().set(SecureKeys.authToken, 'token-1');
     const me = mockApi<() => Promise<User>>(authApi.me).mockResolvedValue(user({ name: 'Ana' }));
 
     resetStore();
@@ -81,30 +90,34 @@ describe('restore', () => {
   });
 
   it('persists the refreshed user to storage', async () => {
-    storage.set(StorageKeys.authToken, 'token-1');
+    getSecureStorage().set(SecureKeys.authToken, 'token-1');
     mockApi<() => Promise<User>>(authApi.me).mockResolvedValue(user({ name: 'Ana' }));
 
     useAuthStore.setState({ token: 'token-1' });
     await useAuthStore.getState().restore();
 
-    expect(JSON.parse(storage.getString(StorageKeys.authUser) ?? '{}')).toMatchObject({ name: 'Ana' });
+    expect(JSON.parse(getSecureStorage().getString(SecureKeys.authUser) ?? '{}')).toMatchObject({
+      name: 'Ana',
+    });
   });
 
   it('clears the session on a 401', async () => {
-    storage.set(StorageKeys.authToken, 'stale-token');
-    storage.set(StorageKeys.authUser, JSON.stringify(user()));
+    getSecureStorage().set(SecureKeys.authToken, 'stale-token');
+    getSecureStorage().set(SecureKeys.refreshToken, 'refresh-1');
+    getSecureStorage().set(SecureKeys.authUser, JSON.stringify(user()));
     mockApi<() => Promise<User>>(authApi.me).mockRejectedValue(new ApiError(401, 'expired'));
 
     useAuthStore.setState({ token: 'stale-token', user: user() });
     await useAuthStore.getState().restore();
 
     expect(useAuthStore.getState()).toMatchObject({ token: null, user: null, initialized: true });
-    expect(storage.getString(StorageKeys.authToken)).toBeNull();
-    expect(storage.getString(StorageKeys.authUser)).toBeNull();
+    expect(getSecureStorage().getString(SecureKeys.authToken)).toBeNull();
+    expect(getSecureStorage().getString(SecureKeys.refreshToken)).toBeNull();
+    expect(getSecureStorage().getString(SecureKeys.authUser)).toBeNull();
   });
 
   it('keeps the session on a network failure', async () => {
-    storage.set(StorageKeys.authToken, 'token-1');
+    getSecureStorage().set(SecureKeys.authToken, 'token-1');
     mockApi<() => Promise<User>>(authApi.me).mockRejectedValue(new ApiError(0, 'network'));
 
     useAuthStore.setState({ token: 'token-1' });
@@ -118,13 +131,20 @@ describe('restore', () => {
 // --- signIn / signUp -----------------------------------------------------
 
 describe('signIn', () => {
-  it('stores the token, user, and course languages', async () => {
+  it('stores the token pair, user, and course languages', async () => {
     const { token, user: u } = { token: 'token-new', user: user({ base_language: 'en', language: 'es' }) };
-    mockApi<() => Promise<{ token: string; user: User }>>(authApi.login).mockResolvedValue({ token, user: u });
+    mockApi<() => Promise<{ token: string; refreshToken: string; user: User }>>(authApi.login).mockResolvedValue({
+      token,
+      refreshToken: 'refresh-new',
+      user: u,
+    });
 
     await useAuthStore.getState().signIn('ana@example.com', 'password123');
 
-    expect(storage.getString(StorageKeys.authToken)).toBe('token-new');
+    expect(getSecureStorage().getString(SecureKeys.authToken)).toBe('token-new');
+    expect(getSecureStorage().getString(SecureKeys.refreshToken)).toBe('refresh-new');
+    // Credentials must live in the encrypted store, never the plain one.
+    expect(storage.getString(SecureKeys.authToken)).toBeNull();
     expect(storage.getString(StorageKeys.baseLanguage)).toBe('en');
     expect(storage.getString(StorageKeys.targetLanguage)).toBe('es');
     expect(useAuthStore.getState().user?.id).toBe('u1');
@@ -132,11 +152,12 @@ describe('signIn', () => {
 });
 
 describe('signUp', () => {
-  it('passes the stored course pair to registration', async () => {
+  it('passes the stored course pair to registration and stores the pair', async () => {
     storage.set(StorageKeys.baseLanguage, 'es');
     storage.set(StorageKeys.targetLanguage, 'pt');
-    mockApi<() => Promise<{ token: string; user: User }>>(authApi.register).mockResolvedValue({
+    mockApi<() => Promise<{ token: string; refreshToken: string; user: User }>>(authApi.register).mockResolvedValue({
       token: 'token-reg',
+      refreshToken: 'refresh-reg',
       user: user({ base_language: 'es', language: 'pt', name: 'Ana' }),
     });
 
@@ -144,6 +165,7 @@ describe('signUp', () => {
 
     expect(authApi.register).toHaveBeenCalledWith('ana@example.com', 'password123', 'es', 'pt', 'Ana');
     expect(useAuthStore.getState().token).toBe('token-reg');
+    expect(getSecureStorage().getString(SecureKeys.refreshToken)).toBe('refresh-reg');
   });
 });
 
@@ -173,16 +195,29 @@ describe('setLanguage / setVoice / setName', () => {
 // --- signOut -------------------------------------------------------------
 
 describe('signOut', () => {
-  it('clears the token, user, and storage', () => {
-    storage.set(StorageKeys.authToken, 'token-1');
-    storage.set(StorageKeys.authUser, JSON.stringify(user()));
+  it('clears the token pair, user, and storage', () => {
+    getSecureStorage().set(SecureKeys.authToken, 'token-1');
+    getSecureStorage().set(SecureKeys.refreshToken, 'refresh-1');
+    getSecureStorage().set(SecureKeys.authUser, JSON.stringify(user()));
     useAuthStore.setState({ token: 'token-1', user: user() });
 
     useAuthStore.getState().signOut();
 
     expect(useAuthStore.getState().token).toBeNull();
     expect(useAuthStore.getState().user).toBeNull();
-    expect(storage.getString(StorageKeys.authToken)).toBeNull();
-    expect(storage.getString(StorageKeys.authUser)).toBeNull();
+    expect(getSecureStorage().getString(SecureKeys.authToken)).toBeNull();
+    expect(getSecureStorage().getString(SecureKeys.refreshToken)).toBeNull();
+    expect(getSecureStorage().getString(SecureKeys.authUser)).toBeNull();
+  });
+
+  it('revokes the refresh token server-side, best-effort', () => {
+    getSecureStorage().set(SecureKeys.refreshToken, 'refresh-1');
+    mockApi<(t: string) => Promise<void>>(authApi.logout).mockRejectedValue(new ApiError(0, 'offline'));
+
+    // Must not throw — offline logout clears locally and moves on.
+    useAuthStore.getState().signOut();
+
+    expect(authApi.logout).toHaveBeenCalledWith('refresh-1');
+    expect(useAuthStore.getState().token).toBeNull();
   });
 });

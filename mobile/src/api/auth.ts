@@ -2,8 +2,17 @@ import type { User } from '../types';
 import { apiRequest } from './client';
 
 export type AuthResponse = {
+  /** Short-lived access JWT. */
   token: string;
+  /** Opaque rotating refresh token — single-use, exchanged at `/refresh`. */
+  refreshToken: string;
   user: User;
+};
+
+/** The body of a successful `/api/auth/refresh` call. */
+export type RefreshResponse = {
+  token: string;
+  refresh_token: string;
 };
 
 export function register(
@@ -23,6 +32,25 @@ export function login(email: string, password: string) {
   return apiRequest<AuthResponse>('/api/auth/login', {
     method: 'POST',
     body: { email, password },
+  });
+}
+
+/** Exchanges the stored refresh token for a fresh access JWT + next refresh
+ * token. The presented token is single-use: this response is the only
+ * successor. */
+export function refresh(refreshToken: string) {
+  return apiRequest<RefreshResponse>('/api/auth/refresh', {
+    method: 'POST',
+    body: { refresh_token: refreshToken },
+  });
+}
+
+/** Revokes the refresh token's whole login family server-side. Fire-and-
+ * forget by design: local logout must never depend on the network. */
+export function logout(refreshToken: string) {
+  return apiRequest<void>('/api/auth/logout', {
+    method: 'POST',
+    body: { refresh_token: refreshToken },
   });
 }
 

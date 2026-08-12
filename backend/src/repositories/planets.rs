@@ -8,6 +8,7 @@ use crate::schema::{
     user_sentence_progress,
 };
 use diesel::prelude::*;
+use diesel::Connection;
 use diesel::OptionalExtension;
 use uuid::Uuid;
 
@@ -243,56 +244,73 @@ pub async fn mastered_sentence_ids(
 }
 
 /// Marks a sentence mastered (or not) and returns the planet's new
-/// (mastered, total) counts. Runs the ownership check, the upsert and the
-/// counts on one connection so they can't interleave with another write.
+/// (mastered, total) counts plus whether this call performed a *new*
+/// mastery (false → true). Re-mastering an already-mastered sentence is a
+/// no-op transition and must not pay XP again. The ownership check, the
+/// transition read and the upsert run in one transaction, so two concurrent
+/// "master" calls on the same sentence can't both read "not yet mastered"
+/// and both collect XP.
 pub async fn mark_sentence_mastered(
     pool: &DbPool,
     user_id: Uuid,
     planet_id: Uuid,
     sentence_id: Uuid,
     mastered: bool,
-) -> Result<(i64, i64)> {
+) -> Result<(i64, i64, bool)> {
     run_db(pool, move |conn| {
-        // The sentence must exist and belong to the given planet.
-        let belongs: i64 = planet_sentences::table
-            .filter(planet_sentences::id.eq(sentence_id))
-            .filter(planet_sentences::planet_id.eq(planet_id))
-            .count()
-            .get_result(conn)?;
-        if belongs == 0 {
-            return Err(AppError::not_found("sentence not found in this planet"));
-        }
+        conn.transaction::<_, AppError, _>(|conn| {
+            // The sentence must exist and belong to the given planet.
+            let belongs: i64 = planet_sentences::table
+                .filter(planet_sentences::id.eq(sentence_id))
+                .filter(planet_sentences::planet_id.eq(planet_id))
+                .count()
+                .get_result(conn)?;
+            if belongs == 0 {
+                return Err(AppError::not_found("sentence not found in this planet"));
+            }
 
-        diesel::insert_into(user_sentence_progress::table)
-            .values((
-                user_sentence_progress::user_id.eq(user_id),
-                user_sentence_progress::sentence_id.eq(sentence_id),
-                user_sentence_progress::mastered.eq(mastered),
-            ))
-            .on_conflict((
-                user_sentence_progress::user_id,
-                user_sentence_progress::sentence_id,
-            ))
-            .do_update()
-            .set(user_sentence_progress::mastered.eq(mastered))
-            .execute(conn)?;
+            // Only the false→true transition is a *new* mastery (the
+            // handler awards XP exactly once per sentence). A repeated
+            // "master" call on an already-mastered sentence, or an
+            // un-master, must not re-pay.
+            let prev_mastered = user_sentence_progress::table
+                .find((user_id, sentence_id))
+                .select(user_sentence_progress::mastered)
+                .first::<bool>(conn)
+                .optional()?;
+            let newly_mastered = mastered && prev_mastered != Some(true);
 
-        let mastered_count: i64 = user_sentence_progress::table
-            .inner_join(
-                planet_sentences::table
-                    .on(planet_sentences::id.eq(user_sentence_progress::sentence_id)),
-            )
-            .filter(user_sentence_progress::user_id.eq(user_id))
-            .filter(planet_sentences::planet_id.eq(planet_id))
-            .filter(user_sentence_progress::mastered.eq(true))
-            .count()
-            .get_result(conn)?;
-        let total: i64 = planet_sentences::table
-            .filter(planet_sentences::planet_id.eq(planet_id))
-            .count()
-            .get_result(conn)?;
+            diesel::insert_into(user_sentence_progress::table)
+                .values((
+                    user_sentence_progress::user_id.eq(user_id),
+                    user_sentence_progress::sentence_id.eq(sentence_id),
+                    user_sentence_progress::mastered.eq(mastered),
+                ))
+                .on_conflict((
+                    user_sentence_progress::user_id,
+                    user_sentence_progress::sentence_id,
+                ))
+                .do_update()
+                .set(user_sentence_progress::mastered.eq(mastered))
+                .execute(conn)?;
 
-        Ok((mastered_count, total))
+            let mastered_count: i64 = user_sentence_progress::table
+                .inner_join(
+                    planet_sentences::table
+                        .on(planet_sentences::id.eq(user_sentence_progress::sentence_id)),
+                )
+                .filter(user_sentence_progress::user_id.eq(user_id))
+                .filter(planet_sentences::planet_id.eq(planet_id))
+                .filter(user_sentence_progress::mastered.eq(true))
+                .count()
+                .get_result(conn)?;
+            let total: i64 = planet_sentences::table
+                .filter(planet_sentences::planet_id.eq(planet_id))
+                .count()
+                .get_result(conn)?;
+
+            Ok((mastered_count, total, newly_mastered))
+        })
     })
     .await
 }
@@ -328,37 +346,83 @@ pub async fn all_progress_for(pool: &DbPool, user_id: Uuid) -> Result<Vec<Planet
 }
 
 /// Upserts a progress row (insert on first touch, update afterwards).
-pub async fn store_progress(pool: &DbPool, user_id: Uuid, p: PlanetProgress) -> Result<()> {
-    let planet_id = p.planet_id;
+fn write_progress(
+    conn: &mut diesel::pg::PgConnection,
+    user_id: Uuid,
+    p: &PlanetProgress,
+) -> diesel::QueryResult<usize> {
+    diesel::insert_into(user_planet_progress::table)
+        .values((
+            user_planet_progress::user_id.eq(user_id),
+            user_planet_progress::planet_id.eq(p.planet_id),
+            user_planet_progress::sentences.eq(p.sentences),
+            user_planet_progress::pronunciation.eq(p.pronunciation),
+            user_planet_progress::conversation.eq(p.conversation),
+            user_planet_progress::listening.eq(p.listening),
+            user_planet_progress::flashcards.eq(p.flashcards),
+            user_planet_progress::review.eq(p.review),
+            user_planet_progress::mastery.eq(p.mastery),
+        ))
+        .on_conflict((
+            user_planet_progress::user_id,
+            user_planet_progress::planet_id,
+        ))
+        .do_update()
+        .set((
+            user_planet_progress::sentences.eq(p.sentences),
+            user_planet_progress::pronunciation.eq(p.pronunciation),
+            user_planet_progress::conversation.eq(p.conversation),
+            user_planet_progress::listening.eq(p.listening),
+            user_planet_progress::flashcards.eq(p.flashcards),
+            user_planet_progress::review.eq(p.review),
+            user_planet_progress::mastery.eq(p.mastery),
+        ))
+        .execute(conn)
+}
+
+/// Atomically reads a user's progress row for a planet, applies `f` to it,
+/// and persists the result — the read-modify-write runs in one transaction
+/// with the row locked (`FOR UPDATE`), so concurrent bumps on the same planet
+/// serialize instead of losing each other's delta. A brand-new progress row
+/// is seeded first so the lock always has a row to take (same pattern as the
+/// gamification stats write). Returns the persisted mastery.
+pub async fn mutate_progress<F>(pool: &DbPool, user_id: Uuid, planet_id: Uuid, f: F) -> Result<f64>
+where
+    F: FnOnce(&mut PlanetProgress) + Send + 'static,
+{
     run_db(pool, move |conn| {
-        diesel::insert_into(user_planet_progress::table)
-            .values((
-                user_planet_progress::user_id.eq(user_id),
-                user_planet_progress::planet_id.eq(planet_id),
-                user_planet_progress::sentences.eq(p.sentences),
-                user_planet_progress::pronunciation.eq(p.pronunciation),
-                user_planet_progress::conversation.eq(p.conversation),
-                user_planet_progress::listening.eq(p.listening),
-                user_planet_progress::flashcards.eq(p.flashcards),
-                user_planet_progress::review.eq(p.review),
-                user_planet_progress::mastery.eq(p.mastery),
-            ))
-            .on_conflict((
-                user_planet_progress::user_id,
-                user_planet_progress::planet_id,
-            ))
-            .do_update()
-            .set((
-                user_planet_progress::sentences.eq(p.sentences),
-                user_planet_progress::pronunciation.eq(p.pronunciation),
-                user_planet_progress::conversation.eq(p.conversation),
-                user_planet_progress::listening.eq(p.listening),
-                user_planet_progress::flashcards.eq(p.flashcards),
-                user_planet_progress::review.eq(p.review),
-                user_planet_progress::mastery.eq(p.mastery),
-            ))
-            .execute(conn)?;
-        Ok(())
+        conn.transaction::<_, AppError, _>(|conn| {
+            let exists = user_planet_progress::table
+                .find((user_id, planet_id))
+                .first::<PlanetProgress>(conn)
+                .optional()?
+                .is_some();
+            if !exists {
+                // `do_nothing`: two simultaneous first-touches on a fresh row
+                // race here — the second insert must be a no-op (and the
+                // FOR UPDATE read below picks up the committed row) rather
+                // than a UniqueViolation.
+                diesel::insert_into(user_planet_progress::table)
+                    .values((
+                        user_planet_progress::user_id.eq(user_id),
+                        user_planet_progress::planet_id.eq(planet_id),
+                    ))
+                    .on_conflict((
+                        user_planet_progress::user_id,
+                        user_planet_progress::planet_id,
+                    ))
+                    .do_nothing()
+                    .execute(conn)?;
+            }
+            let mut current = user_planet_progress::table
+                .find((user_id, planet_id))
+                .for_update()
+                .first::<PlanetProgress>(conn)?;
+            f(&mut current);
+            let mastery = current.mastery;
+            write_progress(conn, user_id, &current)?;
+            Ok(mastery)
+        })
     })
     .await
 }
@@ -503,28 +567,27 @@ pub async fn cumulative_review_sample(
             .filter(planets::language.eq(&language))
             .order(planets::number.desc())
             .limit(limit);
-        let rows: Vec<(String, String)> =
-            match (language.as_str(), base_language.as_str()) {
-                ("es", "pt") => query
-                    .select((planet_sentences::es, planet_sentences::pt))
-                    .load(conn)?,
-                ("pt", "en") => query
-                    .select((planet_sentences::pt, planet_sentences::en))
-                    .load(conn)?,
-                ("en", "es") => query
-                    .select((planet_sentences::en, planet_sentences::es))
-                    .load(conn)?,
-                ("es", "en") => query
-                    .select((planet_sentences::es, planet_sentences::en))
-                    .load(conn)?,
-                ("pt", "es") => query
-                    .select((planet_sentences::pt, planet_sentences::es))
-                    .load(conn)?,
-                // ("en", "pt") and any legacy fallback
-                _ => query
-                    .select((planet_sentences::en, planet_sentences::pt))
-                    .load(conn)?,
-            };
+        let rows: Vec<(String, String)> = match (language.as_str(), base_language.as_str()) {
+            ("es", "pt") => query
+                .select((planet_sentences::es, planet_sentences::pt))
+                .load(conn)?,
+            ("pt", "en") => query
+                .select((planet_sentences::pt, planet_sentences::en))
+                .load(conn)?,
+            ("en", "es") => query
+                .select((planet_sentences::en, planet_sentences::es))
+                .load(conn)?,
+            ("es", "en") => query
+                .select((planet_sentences::es, planet_sentences::en))
+                .load(conn)?,
+            ("pt", "es") => query
+                .select((planet_sentences::pt, planet_sentences::es))
+                .load(conn)?,
+            // ("en", "pt") and any legacy fallback
+            _ => query
+                .select((planet_sentences::en, planet_sentences::pt))
+                .load(conn)?,
+        };
         Ok(rows)
     })
     .await

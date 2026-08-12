@@ -108,7 +108,9 @@ pub fn sentences_progress(mastered: i64, total: i64) -> f64 {
 
 /// Sets one metric to an absolute value (0..1) and persists the recomputed
 /// mastery. Used for metrics that reflect real, countable state (sentences
-/// mastered, flashcards graduated) rather than a delta.
+/// mastered, flashcards graduated) rather than a delta. The read-modify-write
+/// is atomic (row lock + transaction), so an absolute write can never
+/// clobber a concurrent delta on another metric of the same planet.
 pub async fn set_metric_absolute(
     pool: &DbPool,
     user_id: Uuid,
@@ -116,15 +118,17 @@ pub async fn set_metric_absolute(
     metric: &str,
     value: f64,
 ) -> Result<f64> {
-    let current = repositories::planets::load_progress(pool, user_id, planet_id).await?;
-    let updated = with_metric(current, metric, value);
-    let mastery = updated.mastery;
-    repositories::planets::store_progress(pool, user_id, updated).await?;
-    Ok(mastery)
+    let metric = metric.to_string();
+    repositories::planets::mutate_progress(pool, user_id, planet_id, move |p| {
+        *p = with_metric(p.clone(), &metric, value);
+    })
+    .await
 }
 
 /// Bumps one metric by a delta (clamped to 0..1) and persists the recomputed
-/// mastery. Used for the AI's qualitative judgment calls during a live session.
+/// mastery. Used for the AI's qualitative judgment calls during a live
+/// session. Atomic like [`set_metric_absolute`], so concurrent bumps on the
+/// same planet can't lose each other's delta.
 pub async fn bump_metric_delta(
     pool: &DbPool,
     user_id: Uuid,
@@ -132,9 +136,12 @@ pub async fn bump_metric_delta(
     metric: &str,
     delta: f64,
 ) -> Result<f64> {
-    let current = repositories::planets::load_progress(pool, user_id, planet_id).await?;
-    let next = current.metric(metric) + delta;
-    set_metric_absolute(pool, user_id, planet_id, metric, next).await
+    let metric = metric.to_string();
+    repositories::planets::mutate_progress(pool, user_id, planet_id, move |p| {
+        let next = p.metric(&metric) + delta;
+        *p = with_metric(p.clone(), &metric, next);
+    })
+    .await
 }
 
 // ---------------------------------------------------------------------------

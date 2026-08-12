@@ -1,8 +1,8 @@
 import { create } from 'zustand';
-import { storage, StorageKeys } from '../storage';
+import { getSecureStorage, SecureKeys, storage, StorageKeys } from '../storage';
 import type { User } from '../types';
 import * as authApi from '../api/auth';
-import { ApiError } from '../api/client';
+import { ApiError, setSessionExpiredHandler } from '../api/client';
 import { localeForBaseLanguage, useI18nStore } from '../i18n';
 
 type AuthState = {
@@ -23,7 +23,7 @@ type AuthState = {
 };
 
 function readStoredUser(): User | null {
-  const raw = storage.getString(StorageKeys.authUser);
+  const raw = getSecureStorage().getString(SecureKeys.authUser);
   if (!raw) return null;
   try {
     const user = JSON.parse(raw) as User;
@@ -45,7 +45,7 @@ function readStoredUser(): User | null {
  * language while the server answers in another.
  */
 function persistUser(user: User): void {
-  storage.set(StorageKeys.authUser, JSON.stringify(user));
+  getSecureStorage().set(SecureKeys.authUser, JSON.stringify(user));
   if (user.base_language) storage.set(StorageKeys.baseLanguage, user.base_language);
   storage.set(StorageKeys.targetLanguage, user.language);
 
@@ -55,27 +55,54 @@ function persistUser(user: User): void {
   if (locale && locale !== i18n.locale) i18n.setLocale(locale);
 }
 
+/** The whole session is wiped: state, storage, and (fire-and-forget) the
+ * server-side refresh token so it can't be replayed after logout. */
+function clearSession(revokeServerSide: boolean): void {
+  const refreshToken = getSecureStorage().getString(SecureKeys.refreshToken);
+  if (revokeServerSide && refreshToken) {
+    authApi.logout(refreshToken).catch(() => {
+      // Best effort — the local session is gone regardless of what the
+      // server says (offline logout must never fail the UI).
+    });
+  }
+  getSecureStorage().remove(SecureKeys.authToken);
+  getSecureStorage().remove(SecureKeys.refreshToken);
+  getSecureStorage().remove(SecureKeys.authUser);
+  useAuthStore.setState({ token: null, user: null });
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
-  token: storage.getString(StorageKeys.authToken) ?? null,
-  user: readStoredUser(),
+  // Read lazily in restore(): the secure store is initialized asynchronously
+  // at app start, after this module was created.
+  token: null,
+  user: null,
   initialized: false,
 
   restore: async () => {
-    const token = get().token;
+    const token = getSecureStorage().getString(SecureKeys.authToken);
     if (!token) {
       set({ initialized: true });
       return;
     }
+    set({ token });
+    const storedUser = readStoredUser();
+    if (storedUser) set({ user: storedUser });
     try {
+      // me() goes through the client's 401 interceptor: an expired access
+      // token is transparently refreshed (rotating the stored refresh
+      // token) and the request retried. Only a dead refresh token reaches
+      // this catch as 401.
       const user = await authApi.me();
       persistUser(user);
       set({ user, initialized: true });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        // Token is invalid or expired — clear the session.
-        storage.remove(StorageKeys.authToken);
-        storage.remove(StorageKeys.authUser);
-        set({ token: null, user: null, initialized: true });
+        // Access AND refresh tokens are gone — the session cannot be
+        // restored. (The interceptor already fired signOut on the refresh
+        // failure; this branch is the fallback when the /me 401 was not
+        // preempted, e.g. no refresh token was ever stored.)
+        clearSession(false);
+        set({ initialized: true });
       } else {
         // Network hiccup — keep the session and stored user.
         set({ initialized: true });
@@ -84,8 +111,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signIn: async (email, password) => {
-    const { token, user } = await authApi.login(email, password);
-    storage.set(StorageKeys.authToken, token);
+    const { token, refreshToken, user } = await authApi.login(email, password);
+    getSecureStorage().set(SecureKeys.authToken, token);
+    getSecureStorage().set(SecureKeys.refreshToken, refreshToken);
     persistUser(user);
     set({ token, user });
   },
@@ -95,8 +123,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // travels with the account; fall back to the backend defaults ('pt' → 'en').
     const baseLanguage = storage.getString(StorageKeys.baseLanguage) ?? undefined;
     const language = storage.getString(StorageKeys.targetLanguage) ?? undefined;
-    const { token, user } = await authApi.register(email, password, baseLanguage, language, name?.trim());
-    storage.set(StorageKeys.authToken, token);
+    const { token, refreshToken, user } = await authApi.register(
+      email,
+      password,
+      baseLanguage,
+      language,
+      name?.trim(),
+    );
+    getSecureStorage().set(SecureKeys.authToken, token);
+    getSecureStorage().set(SecureKeys.refreshToken, refreshToken);
     persistUser(user);
     set({ token, user });
   },
@@ -123,8 +158,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signOut: () => {
-    storage.remove(StorageKeys.authToken);
-    storage.remove(StorageKeys.authUser);
-    set({ token: null, user: null });
+    clearSession(true);
   },
 }));
+
+// The client's 401 interceptor ends the session when the refresh token is
+// rejected. Registering here keeps the circular import out of client.ts
+// while guaranteeing one behavior everywhere: dead session = signOut.
+setSessionExpiredHandler(() => {
+  clearSession(false);
+});

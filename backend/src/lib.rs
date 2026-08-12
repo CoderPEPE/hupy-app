@@ -19,10 +19,13 @@ pub mod services;
 pub mod state;
 
 use axum::http::header::HeaderValue;
+use axum::http::StatusCode;
 use axum::Router;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations};
 use state::AppState;
+use std::time::Duration;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 
 /// Applied automatically on every boot so the DB always matches the code.
@@ -59,12 +62,22 @@ pub fn build_router(state: AppState) -> Router {
         )
         .nest("/api/auth", api::auth::router(state.clone()))
         .nest("/api/realtime", api::realtime::router(state.clone()))
-        .nest("/api/planets", api::planets::router())
-        .nest("/api/conversations", api::conversations::router())
-        .nest("/api/flashcards", api::flashcards::router())
+        .nest("/api/planets", api::planets::router(state.clone()))
+        .nest(
+            "/api/conversations",
+            api::conversations::router(state.clone()),
+        )
+        .nest("/api/flashcards", api::flashcards::router(state.clone()))
         .nest("/api/gamification", api::gamification::router())
         .nest("/api/tts", api::tts::router(state.clone()))
         .nest("/api/voices", api::voices::router())
+        // A global ceiling on how long any handler may run — a stuck DB call
+        // or a slow upstream must time out (504) instead of holding a
+        // connection forever.
+        .layer(TimeoutLayer::with_status_code(
+            StatusCode::GATEWAY_TIMEOUT,
+            Duration::from_secs(60),
+        ))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

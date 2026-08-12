@@ -63,6 +63,11 @@ mod tests {
             auth_rate_window_secs: 60,
             tts_rate_max_requests: 120,
             tts_rate_window_secs: 60,
+            write_rate_max_requests: 120,
+            write_rate_window_secs: 60,
+            tts_cache_max_age_days: 30,
+            access_token_ttl_secs: 900,
+            refresh_token_ttl_secs: 30 * 24 * 3600,
         };
         AppState::new(config, pool)
     }
@@ -80,9 +85,11 @@ mod tests {
     async fn accepts_a_valid_bearer_token() {
         let state = test_state();
         let user_id = Uuid::new_v4();
-        let token = jwt::create_token(SECRET, user_id).unwrap();
+        let token = jwt::create_token(SECRET, user_id, 3600).unwrap();
         let mut parts = parts_with_authorization(Some(&format!("Bearer {token}")));
-        let user = AuthUser::from_request_parts(&mut parts, &state).await.unwrap();
+        let user = AuthUser::from_request_parts(&mut parts, &state)
+            .await
+            .unwrap();
         assert_eq!(user.0, user_id);
     }
 
@@ -90,14 +97,16 @@ mod tests {
     async fn missing_header_is_unauthorized() {
         let state = test_state();
         let mut parts = parts_with_authorization(None);
-        let err = AuthUser::from_request_parts(&mut parts, &state).await.unwrap_err();
+        let err = AuthUser::from_request_parts(&mut parts, &state)
+            .await
+            .unwrap_err();
         assert!(matches!(err, AppError::Unauthorized(_)));
     }
 
     #[tokio::test]
     async fn non_bearer_scheme_is_unauthorized() {
         let state = test_state();
-        let token = jwt::create_token(SECRET, Uuid::new_v4()).unwrap();
+        let token = jwt::create_token(SECRET, Uuid::new_v4(), 3600).unwrap();
         for header in [
             format!("Basic {token}"),
             format!("bearer {token}"), // scheme is case-sensitive by design
@@ -105,21 +114,28 @@ mod tests {
             format!("Bearer {token} extra"),
         ] {
             let mut parts = parts_with_authorization(Some(&header));
-            let err = AuthUser::from_request_parts(&mut parts, &state).await.unwrap_err();
-            assert!(matches!(err, AppError::Unauthorized(_)), "header: {header:?}");
+            let err = AuthUser::from_request_parts(&mut parts, &state)
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, AppError::Unauthorized(_)),
+                "header: {header:?}"
+            );
         }
     }
 
     #[tokio::test]
     async fn tampered_token_is_unauthorized() {
         let state = test_state();
-        let token = jwt::create_token(SECRET, Uuid::new_v4()).unwrap();
+        let token = jwt::create_token(SECRET, Uuid::new_v4(), 3600).unwrap();
         let mut bytes = token.into_bytes();
         let last = bytes.last_mut().unwrap();
         *last = if *last == b'Z' { b'Y' } else { b'Z' };
         let bad = String::from_utf8(bytes).unwrap();
         let mut parts = parts_with_authorization(Some(&format!("Bearer {bad}")));
-        let err = AuthUser::from_request_parts(&mut parts, &state).await.unwrap_err();
+        let err = AuthUser::from_request_parts(&mut parts, &state)
+            .await
+            .unwrap_err();
         assert!(matches!(err, AppError::Unauthorized(_)));
     }
 
@@ -138,7 +154,9 @@ mod tests {
         )
         .unwrap();
         let mut parts = parts_with_authorization(Some(&format!("Bearer {expired}")));
-        let err = AuthUser::from_request_parts(&mut parts, &state).await.unwrap_err();
+        let err = AuthUser::from_request_parts(&mut parts, &state)
+            .await
+            .unwrap_err();
         assert!(matches!(err, AppError::Unauthorized(_)));
     }
 }

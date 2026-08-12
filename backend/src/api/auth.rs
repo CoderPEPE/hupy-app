@@ -6,6 +6,7 @@ use crate::middleware::auth::AuthUser;
 use crate::models::{NewUser, User};
 use crate::password;
 use crate::repositories;
+use crate::repositories::refresh_tokens::RotateOutcome;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -20,6 +21,8 @@ pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/register", post(register))
         .route("/login", post(login))
+        .route("/refresh", post(refresh))
+        .route("/logout", post(logout))
         .route("/me", get(me))
         .route("/language", post(set_language))
         .route("/voice", post(set_voice))
@@ -48,7 +51,11 @@ pub struct AuthRequest {
 
 #[derive(Debug, Serialize)]
 pub struct AuthResponse {
+    /// Short-lived access JWT.
     pub token: String,
+    /// Opaque rotating refresh token — exchanged for a fresh token pair at
+    /// `/auth/refresh`. The client stores it; the server only keeps its hash.
+    pub refresh_token: String,
     pub user: UserResponse,
 }
 
@@ -141,9 +148,44 @@ fn validate_credentials(email: &str, password: &str) -> Result<()> {
 
 fn validate_name(name: &str) -> Result<()> {
     if name.chars().count() > 120 {
-        return Err(AppError::bad_request("Name is too long (max 120 characters)"));
+        return Err(AppError::bad_request(
+            "Name is too long (max 120 characters)",
+        ));
     }
     Ok(())
+}
+
+/// The token pair a fresh login receives: a short-lived access JWT plus an
+/// opaque rotating refresh token. Every login gets a brand-new family id, so
+/// logging out on one device never kills another device's session; refresh
+/// rotation keeps its login's family.
+///
+/// `mint_token_pair` is pure (no I/O); the caller decides how to persist the
+/// refresh hash — atomically with account creation, or standalone for login.
+struct MintedTokenPair {
+    access: String,
+    raw_refresh: String,
+    refresh_hash: String,
+    family_id: Uuid,
+    expires_at: chrono::DateTime<Utc>,
+}
+
+fn mint_token_pair(state: &AppState, user_id: Uuid, family_id: Uuid) -> Result<MintedTokenPair> {
+    let access = jwt::create_token(
+        state.jwt_secret(),
+        user_id,
+        state.config.access_token_ttl_secs,
+    )
+    .map_err(|e| AppError::internal(format!("failed to create token: {e}")))?;
+    let raw_refresh = repositories::refresh_tokens::generate_token();
+    Ok(MintedTokenPair {
+        access,
+        refresh_hash: repositories::refresh_tokens::hash_token(&raw_refresh),
+        raw_refresh,
+        family_id,
+        expires_at: chrono::Utc::now()
+            + chrono::Duration::seconds(state.config.refresh_token_ttl_secs),
+    })
 }
 
 async fn register(
@@ -172,15 +214,24 @@ async fn register(
         name,
     };
 
-    let user = repositories::users::create(&state.pool, &new_user).await?;
-
-    let token = jwt::create_token(state.jwt_secret(), user.id)
-        .map_err(|e| AppError::internal(format!("failed to create token: {e}")))?;
+    // Mint before persisting so the account and its first refresh token land
+    // in one transaction — a failure can never leave an account with no
+    // session (which would strand the user behind a retry-409 loop).
+    let pair = mint_token_pair(&state, new_user.id, Uuid::new_v4())?;
+    let user = repositories::users::create_with_refresh_token(
+        &state.pool,
+        &new_user,
+        &pair.refresh_hash,
+        pair.family_id,
+        pair.expires_at,
+    )
+    .await?;
 
     Ok((
         StatusCode::CREATED,
         Json(AuthResponse {
-            token,
+            token: pair.access,
+            refresh_token: pair.raw_refresh,
             user: user.into(),
         }),
     ))
@@ -217,13 +268,124 @@ async fn login(
         return Err(AppError::unauthorized("Invalid email or password"));
     }
 
-    let token = jwt::create_token(state.jwt_secret(), user.id)
-        .map_err(|e| AppError::internal(format!("failed to create token: {e}")))?;
+    let pair = mint_token_pair(&state, user.id, Uuid::new_v4())?;
+    repositories::refresh_tokens::issue(
+        &state.pool,
+        user.id,
+        pair.family_id,
+        &pair.refresh_hash,
+        pair.expires_at,
+    )
+    .await?;
 
     Ok(Json(AuthResponse {
-        token,
+        token: pair.access,
+        refresh_token: pair.raw_refresh,
         user: user.into(),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RefreshRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RefreshResponse {
+    /// Fresh short-lived access JWT.
+    pub token: String,
+    /// The next refresh token — every call rotates the previous one.
+    pub refresh_token: String,
+}
+
+/// Rotates a refresh token into a fresh token pair. Every successful call
+/// revokes the presented token and mints a new one in the same family;
+/// presenting an already-rotated (stolen) token revokes the whole family.
+///
+/// Tradeoff worth knowing: because rotation is single-use, a refresh that the
+/// server processes but the client never receives (lost response) leaves the
+/// client holding a now-revoked token — its next refresh attempt triggers
+/// reuse detection and revokes the family, logging the user out. This is
+/// inherent to single-use rotation; the mobile client minimizes it by never
+/// retrying a refresh and by surfacing network failures without declaring
+/// the session dead.
+async fn refresh(
+    State(state): State<AppState>,
+    Json(body): Json<RefreshRequest>,
+) -> Result<Json<RefreshResponse>> {
+    let raw = body.refresh_token.trim().to_string();
+    if raw.is_empty() {
+        return Err(AppError::bad_request("refresh_token is required"));
+    }
+    if raw.len() > 512 {
+        return Err(AppError::bad_request("refresh_token is invalid"));
+    }
+
+    // Opportunistic housekeeping: expired/old rows are deleted on the auth
+    // hot path (once per refresh) so the table stays bounded. A prune
+    // failure is logged, never propagated — auth must not fail over cleanup.
+    repositories::refresh_tokens::prune_expired(&state.pool).await;
+
+    // Generate the successor token up front so its hash rides the same
+    // rotation transaction and the raw value can be returned to the client.
+    let new_raw = repositories::refresh_tokens::generate_token();
+    let new_expires_at =
+        chrono::Utc::now() + chrono::Duration::seconds(state.config.refresh_token_ttl_secs);
+
+    let outcome = repositories::refresh_tokens::rotate(
+        &state.pool,
+        &repositories::refresh_tokens::hash_token(&raw),
+        &repositories::refresh_tokens::hash_token(&new_raw),
+        new_expires_at,
+    )
+    .await?;
+
+    let RotateOutcome::Rotated { token } = outcome else {
+        return Err(AppError::unauthorized("Invalid refresh token"));
+    };
+
+    let access = jwt::create_token(
+        state.jwt_secret(),
+        token.user_id,
+        state.config.access_token_ttl_secs,
+    )
+    .map_err(|e| AppError::internal(format!("failed to create token: {e}")))?;
+
+    Ok(Json(RefreshResponse {
+        token: access,
+        refresh_token: new_raw,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LogoutRequest {
+    pub refresh_token: String,
+}
+
+/// Revokes the presented token's whole family — every session minted from
+/// that login (all rotations of the same login) dies. A missing or already
+/// revoked token is still a successful logout (idempotent).
+async fn logout(
+    State(state): State<AppState>,
+    Json(body): Json<LogoutRequest>,
+) -> Result<StatusCode> {
+    let raw = body.refresh_token.trim().to_string();
+    if raw.is_empty() {
+        return Err(AppError::bad_request("refresh_token is required"));
+    }
+    if raw.len() > 512 {
+        return Err(AppError::bad_request("refresh_token is invalid"));
+    }
+
+    // Find the family for this token, then revoke it. Unknown tokens are
+    // idempotently "already logged out".
+    let hash = repositories::refresh_tokens::hash_token(&raw);
+    let row = repositories::refresh_tokens::find_by_hash(&state.pool, &hash).await?;
+    if let Some(row) = row {
+        repositories::refresh_tokens::revoke_family(&state.pool, row.family_id).await?;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn me(
@@ -350,9 +512,18 @@ mod tests {
 
     #[test]
     fn resolve_course_pair_defaults_the_base_from_the_target() {
-        assert_eq!(resolve_course_pair(&None, "en").unwrap(), ("pt".into(), "en".into()));
-        assert_eq!(resolve_course_pair(&None, "es").unwrap(), ("pt".into(), "es".into()));
-        assert_eq!(resolve_course_pair(&None, "pt").unwrap(), ("en".into(), "pt".into()));
+        assert_eq!(
+            resolve_course_pair(&None, "en").unwrap(),
+            ("pt".into(), "en".into())
+        );
+        assert_eq!(
+            resolve_course_pair(&None, "es").unwrap(),
+            ("pt".into(), "es".into())
+        );
+        assert_eq!(
+            resolve_course_pair(&None, "pt").unwrap(),
+            ("en".into(), "pt".into())
+        );
     }
 
     #[test]

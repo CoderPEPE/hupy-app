@@ -45,10 +45,41 @@ async fn main() {
         listener.local_addr().unwrap()
     );
     // Provide ConnectInfo (client socket) for the rate-limiting middleware.
+    // `with_graceful_shutdown` lets in-flight requests finish when the
+    // process receives SIGTERM/SIGINT (deploys, `docker stop`, Ctrl+C)
+    // instead of dropping them mid-flight.
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await
     .unwrap();
+}
+
+/// Waits for SIGINT (Ctrl+C) or SIGTERM (docker stop, orchestrated deploys)
+/// and returns, triggering the server's graceful drain.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+    tracing::info!("shutdown signal received, draining in-flight requests");
 }

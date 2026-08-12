@@ -35,12 +35,22 @@ impl AppError {
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
+        // 4xx messages are user-facing and stay as written. Internal errors
+        // are logged in full server-side but never echoed to the client —
+        // leaking database/upstream details ("database error: …", OpenAI
+        // error JSON) gives attackers reconnaissance they don't need.
         let (status, message) = match self {
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, m),
             AppError::Unauthorized(m) => (StatusCode::UNAUTHORIZED, m),
             AppError::Conflict(m) => (StatusCode::CONFLICT, m),
             AppError::NotFound(m) => (StatusCode::NOT_FOUND, m),
-            AppError::Internal(m) => (StatusCode::INTERNAL_SERVER_ERROR, m),
+            AppError::Internal(m) => {
+                tracing::error!("internal server error: {m}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_string(),
+                )
+            }
         };
         (status, Json(json!({ "error": message }))).into_response()
     }
@@ -97,10 +107,16 @@ mod tests {
     #[test]
     fn status_codes_match_error_kinds() {
         assert_eq!(status(AppError::bad_request("x")), StatusCode::BAD_REQUEST);
-        assert_eq!(status(AppError::unauthorized("x")), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            status(AppError::unauthorized("x")),
+            StatusCode::UNAUTHORIZED
+        );
         assert_eq!(status(AppError::conflict("x")), StatusCode::CONFLICT);
         assert_eq!(status(AppError::not_found("x")), StatusCode::NOT_FOUND);
-        assert_eq!(status(AppError::internal("x")), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            status(AppError::internal("x")),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 
     #[tokio::test]

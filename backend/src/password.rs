@@ -54,4 +54,3 @@ mod tests {
         assert!(verify_password("same password", &b));
     }
 }
-

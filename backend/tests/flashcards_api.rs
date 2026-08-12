@@ -50,7 +50,10 @@ async fn review_drives_spaced_repetition() {
     assert_eq!(body["interval_days"], 3);
     assert_eq!(body["last_rating"], "medium");
     assert_eq!(body["repetitions"], 1);
-    assert!(!body["due"].as_bool().unwrap(), "a card 3 days out must not be due");
+    assert!(
+        !body["due"].as_bool().unwrap(),
+        "a card 3 days out must not be due"
+    );
 
     // Easy on the next review grows the interval and the ease factor.
     let (status, body) = request(
@@ -138,7 +141,15 @@ async fn due_filter_and_invalid_ratings() {
         "10.0.23.2",
     )
     .await;
-    let (_, list) = request(&app, "GET", "/api/flashcards?due=true", Some(&token), None, "10.0.23.3").await;
+    let (_, list) = request(
+        &app,
+        "GET",
+        "/api/flashcards?due=true",
+        Some(&token),
+        None,
+        "10.0.23.3",
+    )
+    .await;
     assert_eq!(list.as_array().unwrap().len(), 0);
 
     // Unknown rating rejected.

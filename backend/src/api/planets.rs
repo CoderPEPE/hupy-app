@@ -9,14 +9,23 @@ use crate::repositories;
 use crate::services;
 use crate::state::AppState;
 use axum::extract::{Path, Query, State};
-use axum::routing::get;
+use axum::middleware;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
+    // Per-IP anti-abuse cap on the two mutating routes (progress bumps,
+    // sentence mastery), sharing one budget with conversations/flashcards
+    // writes. The read paths — including the public /catalog — stay
+    // unlimited.
+    let write = middleware::from_fn_with_state(
+        state.clone(),
+        crate::middleware::ratelimit::write_ratelimit,
+    );
     Router::new()
         .route("/", get(list_planets))
         // Unauthenticated: how much content the course actually contains, so
@@ -25,10 +34,10 @@ pub fn router() -> Router<AppState> {
         .route("/catalog", get(catalog_stats))
         .route("/{id}", get(planet_detail))
         .route("/{id}/lesson", get(planet_lesson))
-        .route("/{id}/progress", axum::routing::post(bump_progress))
+        .route("/{id}/progress", post(bump_progress).layer(write.clone()))
         .route(
             "/{id}/sentences/{sentence_id}/master",
-            axum::routing::post(master_sentence),
+            post(master_sentence).layer(write),
         )
 }
 
@@ -265,7 +274,8 @@ async fn list_planets(
         .await?
         .map(|u| (u.base_language, u.language))
         .unwrap_or_else(|| ("pt".into(), "en".into()));
-    let all = repositories::planets::list_for_course(&state.pool, &base_language, &language).await?;
+    let all =
+        repositories::planets::list_for_course(&state.pool, &base_language, &language).await?;
 
     // All progress rows for this user, keyed by planet id.
     let rows = repositories::planets::all_progress_for(&state.pool, user_id).await?;
@@ -358,11 +368,8 @@ async fn planet_detail(
         .await?
         .into_iter()
         .map(|s: Sentence| {
-            let (en, pt) = crate::models::planet::sentence_texts(
-                &s,
-                &planet.language,
-                &planet.base_language,
-            );
+            let (en, pt) =
+                crate::models::planet::sentence_texts(&s, &planet.language, &planet.base_language);
             SentenceJson {
                 id: s.id,
                 position: s.position,
@@ -536,14 +543,15 @@ async fn bump_progress(
 }
 
 /// Marks a sentence mastered / not mastered; the planet's "sentences" metric
-/// becomes mastered/total.
+/// becomes mastered/total. XP is awarded only on a *new* mastery — repeating
+/// "master" on an already-mastered sentence must not farm XP.
 async fn master_sentence(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
     Path((planet_id, sentence_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<SentenceMaster>,
 ) -> Result<Json<Value>> {
-    let (mastered, total) = repositories::planets::mark_sentence_mastered(
+    let (mastered, total, newly_mastered) = repositories::planets::mark_sentence_mastered(
         &state.pool,
         user_id,
         planet_id,
@@ -561,7 +569,7 @@ async fn master_sentence(
     )
     .await?;
 
-    if body.mastered {
+    if newly_mastered {
         services::gamification::touch_activity_and_award_xp(&state.pool, user_id, 8).await;
     }
 

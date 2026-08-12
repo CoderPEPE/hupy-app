@@ -8,21 +8,33 @@ use crate::services;
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::routing::get;
+use axum::middleware;
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
+    // Per-IP anti-abuse cap on every mutating route (create, messages,
+    // corrections, delete), sharing one budget with flashcards/planets
+    // writes. Reads stay unlimited — the app polls the lists on every
+    // screen visit.
+    let write = middleware::from_fn_with_state(
+        state.clone(),
+        crate::middleware::ratelimit::write_ratelimit,
+    );
     Router::new()
-        .route("/", get(list_conversations).post(create_conversation))
+        .route(
+            "/",
+            get(list_conversations).merge(post(create_conversation).layer(write.clone())),
+        )
         .route(
             "/{id}",
-            get(conversation_detail).delete(delete_conversation),
+            get(conversation_detail).merge(delete(delete_conversation).layer(write.clone())),
         )
-        .route("/{id}/messages", axum::routing::post(add_message))
-        .route("/{id}/corrections", axum::routing::post(add_correction))
+        .route("/{id}/messages", post(add_message).layer(write.clone()))
+        .route("/{id}/corrections", post(add_correction).layer(write))
 }
 
 // ---------------------------------------------------------------------------

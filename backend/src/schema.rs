@@ -189,6 +189,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    refresh_tokens (id) {
+        id -> Uuid,
+        user_id -> Uuid,
+        #[max_length = 64]
+        token_hash -> Varchar,
+        family_id -> Uuid,
+        expires_at -> Timestamptz,
+        created_at -> Timestamptz,
+        revoked_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
     tts_audio (cache_key) {
         #[max_length = 64]
         cache_key -> Varchar,
@@ -287,6 +300,7 @@ diesel::joinable!(lesson_steps -> planets (planet_id));
 diesel::joinable!(messages -> conversations (conversation_id));
 diesel::joinable!(planet_lessons -> planets (planet_id));
 diesel::joinable!(planet_sentences -> planets (planet_id));
+diesel::joinable!(refresh_tokens -> users (user_id));
 diesel::joinable!(user_badges -> badges (badge_id));
 diesel::joinable!(user_badges -> users (user_id));
 diesel::joinable!(user_planet_progress -> planets (planet_id));
@@ -306,6 +320,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     planet_lessons,
     planet_sentences,
     planets,
+    refresh_tokens,
     tts_audio,
     tutor_voices,
     user_badges,
