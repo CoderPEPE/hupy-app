@@ -205,6 +205,15 @@ export const ptBR: Translations = {
   'chat.hint.demoPause': 'Aula demo · toque para pausar',
   'chat.hint.demoResume': 'Pausado · toque para continuar',
 
+  // Chat — barra de progresso do módulo (apenas em aulas). Um segmento por
+  // frase, três marcas cada: uma por produção correta, salva no servidor —
+  // fechar o app retoma de onde você parou.
+  'chat.moduleProgress': 'Módulo {{position}}',
+  'chat.moduleProgressComplete': 'Módulo {{position}} concluído',
+  'chat.moduleProgressCount': '{{done}}/{{total}}',
+  'chat.moduleProgressNow': 'Agora: “{{sentence}}”',
+  'chat.moduleProgressReview': 'Conversa concluída — revise seus cartões para abrir o próximo módulo',
+
   // Chat — bottom composer (typed messages + one-tap voice send)
   'chat.input.placeholder': 'Digite uma mensagem…',
   'chat.input.send': 'Enviar mensagem',

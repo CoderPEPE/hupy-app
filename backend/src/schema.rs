@@ -139,6 +139,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    module_structure_progress (user_id, lesson_id, structure_key) {
+        user_id -> Uuid,
+        lesson_id -> Uuid,
+        structure_key -> Text,
+        productions -> Int4,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     planet_lessons (id) {
         id -> Uuid,
         planet_id -> Uuid,
@@ -348,6 +358,8 @@ diesel::joinable!(flashcards -> planets (planet_id));
 diesel::joinable!(flashcards -> users (user_id));
 diesel::joinable!(lesson_steps -> planets (planet_id));
 diesel::joinable!(messages -> conversations (conversation_id));
+diesel::joinable!(module_structure_progress -> planet_lessons (lesson_id));
+diesel::joinable!(module_structure_progress -> users (user_id));
 diesel::joinable!(planet_lessons -> planets (planet_id));
 diesel::joinable!(planet_sentences -> planets (planet_id));
 diesel::joinable!(planet_stories -> planets (planet_id));
@@ -372,6 +384,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     flashcards,
     lesson_steps,
     messages,
+    module_structure_progress,
     planet_lessons,
     planet_sentences,
     planet_stories,

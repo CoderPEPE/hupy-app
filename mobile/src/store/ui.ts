@@ -34,6 +34,10 @@ type UiState = {
   activeDeckId: string | null;
   openDeck: (id: string) => void;
   closeDeck: () => void;
+  /** Switches to the Flashcards tab with a module's pending review deck open —
+   * where "Start review" should land when a module is only waiting on its
+   * cards, instead of starting another chat lesson. */
+  reviewModule: (lessonId: string) => void;
 
   /** Transient banner when a planet unlocks (set by whoever bumps mastery). */
   unlockNotice: string | null;
@@ -61,6 +65,7 @@ export const useUiStore = create<UiState>((set) => ({
   activeDeckId: null,
   openDeck: (id) => set({ activeDeckId: id }),
   closeDeck: () => set({ activeDeckId: null }),
+  reviewModule: (lessonId) => set({ activeTab: 'flashcards', activeDeckId: lessonId }),
 
   unlockNotice: null,
   setUnlockNotice: (message) => set({ unlockNotice: message }),

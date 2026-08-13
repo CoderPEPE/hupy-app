@@ -2,12 +2,12 @@
 //! [`crate::services::curriculum`].
 
 use crate::db::{run_db, DbPool};
-use crate::errors::Result;
+use crate::errors::{AppError, Result};
 use crate::models::{ModuleProgress, PlanetLesson};
-use crate::schema::{flashcards, planet_lessons, user_module_progress};
+use crate::schema::{flashcards, module_structure_progress, planet_lessons, user_module_progress};
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::OptionalExtension;
+use diesel::{Connection, OptionalExtension};
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -143,6 +143,202 @@ pub async fn flashcard_counts(
             .count()
             .get_result(conn)?;
         Ok((total, reviewed))
+    })
+    .await
+}
+
+/// How many successful productions the learner has logged for each structure
+/// of one module, keyed by the structure's target text. Missing keys mean
+/// zero — nothing has been produced yet (no row is created until the first
+/// `record_production` call).
+pub async fn structure_progress(
+    pool: &DbPool,
+    user_id: Uuid,
+    lesson_id: Uuid,
+) -> Result<HashMap<String, i32>> {
+    run_db(pool, move |conn| {
+        let rows: Vec<(String, i32)> = module_structure_progress::table
+            .filter(module_structure_progress::user_id.eq(user_id))
+            .filter(module_structure_progress::lesson_id.eq(lesson_id))
+            .select((
+                module_structure_progress::structure_key,
+                module_structure_progress::productions,
+            ))
+            .load(conn)?;
+        Ok(rows.into_iter().collect())
+    })
+    .await
+}
+
+/// The same production counts across every module of one planet — the
+/// planet-detail endpoint needs all of them at once instead of ten round
+/// trips. Keyed by (lesson_id, structure_key).
+pub async fn structure_progress_for_planet(
+    pool: &DbPool,
+    user_id: Uuid,
+    planet_id: Uuid,
+) -> Result<HashMap<(Uuid, String), i32>> {
+    run_db(pool, move |conn| {
+        let rows: Vec<(Uuid, String, i32)> = module_structure_progress::table
+            .inner_join(
+                planet_lessons::table
+                    .on(planet_lessons::id.eq(module_structure_progress::lesson_id)),
+            )
+            .filter(module_structure_progress::user_id.eq(user_id))
+            .filter(planet_lessons::planet_id.eq(planet_id))
+            .select((
+                module_structure_progress::lesson_id,
+                module_structure_progress::structure_key,
+                module_structure_progress::productions,
+            ))
+            .load(conn)?;
+        Ok(rows.into_iter().map(|(l, k, p)| ((l, k), p)).collect())
+    })
+    .await
+}
+
+/// The result of one `record_production` call — everything the endpoint (and
+/// the tutor reading the response) needs to know about the module's state.
+pub struct ProductionOutcome {
+    /// The structure's new production count (capped at `cap`).
+    pub productions: i32,
+    /// How many of the module's structures have reached the cap.
+    pub done_count: i64,
+    /// How many structures the module has in total.
+    pub total_count: i64,
+    /// True the moment the conversation half of the gate closed — set once,
+    /// when the last structure reaches the cap.
+    pub conversation_done: bool,
+    /// Whether the flashcard half is also already satisfied (no cards were
+    /// minted by this module, so there is nothing to review).
+    pub flashcards_done: bool,
+}
+
+/// Logs one correct production of a module structure and closes the module's
+/// conversation the moment every structure has reached the required count.
+///
+/// This is the deterministic heart of the module gate: the tutor is asked to
+/// call it per correct production, so completion stops depending on the model
+/// remembering to call `complete_module` — which is how modules got stuck
+/// looping forever. The increment, the done-count read and the gate close run
+/// in one transaction, so two concurrent calls cannot both see "one short"
+/// and double-close (or never close).
+pub async fn record_production(
+    pool: &DbPool,
+    user_id: Uuid,
+    lesson_id: Uuid,
+    key: &str,
+    total: i64,
+    cap: i32,
+) -> Result<ProductionOutcome> {
+    let (key, lesson_id) = (key.to_string(), lesson_id);
+    run_db(pool, move |conn| {
+        conn.transaction::<_, AppError, _>(|conn| {
+            // Read the current count, then write the capped increment — the
+            // LEAST-style clamp keeps re-calls on a finished structure from
+            // farming an ever-growing number.
+            let current: i32 = module_structure_progress::table
+                .find((user_id, lesson_id, &key))
+                .select(module_structure_progress::productions)
+                .first::<i32>(conn)
+                .optional()?
+                .unwrap_or(0);
+            let next = (current + 1).min(cap);
+            let now = Utc::now();
+            diesel::insert_into(module_structure_progress::table)
+                .values((
+                    module_structure_progress::user_id.eq(user_id),
+                    module_structure_progress::lesson_id.eq(lesson_id),
+                    module_structure_progress::structure_key.eq(&key),
+                    module_structure_progress::productions.eq(next),
+                    module_structure_progress::updated_at.eq(now),
+                ))
+                .on_conflict((
+                    module_structure_progress::user_id,
+                    module_structure_progress::lesson_id,
+                    module_structure_progress::structure_key,
+                ))
+                .do_update()
+                .set((
+                    module_structure_progress::productions.eq(next),
+                    module_structure_progress::updated_at.eq(now),
+                ))
+                .execute(conn)?;
+
+            let done_count: i64 = module_structure_progress::table
+                .filter(module_structure_progress::user_id.eq(user_id))
+                .filter(module_structure_progress::lesson_id.eq(lesson_id))
+                .filter(module_structure_progress::productions.ge(cap))
+                .count()
+                .get_result(conn)?;
+
+            let was_done = user_module_progress::table
+                .find((user_id, lesson_id))
+                .select(user_module_progress::conversation_done)
+                .first::<bool>(conn)
+                .optional()?
+                .unwrap_or(false);
+
+            let just_closed = !was_done && done_count >= total;
+            let mut flashcards_done = false;
+            if just_closed {
+                // The conversation half of the gate: same semantics as
+                // `complete_conversation` — a module whose conversation
+                // minted no cards has nothing to review, so its flashcard
+                // half closes at the same moment.
+                diesel::insert_into(user_module_progress::table)
+                    .values((
+                        user_module_progress::user_id.eq(user_id),
+                        user_module_progress::lesson_id.eq(lesson_id),
+                        user_module_progress::conversation_done.eq(true),
+                        user_module_progress::updated_at.eq(now),
+                    ))
+                    .on_conflict((
+                        user_module_progress::user_id,
+                        user_module_progress::lesson_id,
+                    ))
+                    .do_update()
+                    .set((
+                        user_module_progress::conversation_done.eq(true),
+                        user_module_progress::updated_at.eq(now),
+                    ))
+                    .execute(conn)?;
+
+                let cards_total: i64 = flashcards::table
+                    .filter(flashcards::user_id.eq(user_id))
+                    .filter(flashcards::lesson_id.eq(lesson_id))
+                    .count()
+                    .get_result(conn)?;
+                if cards_total == 0 {
+                    diesel::insert_into(user_module_progress::table)
+                        .values((
+                            user_module_progress::user_id.eq(user_id),
+                            user_module_progress::lesson_id.eq(lesson_id),
+                            user_module_progress::flashcards_done.eq(true),
+                            user_module_progress::updated_at.eq(now),
+                        ))
+                        .on_conflict((
+                            user_module_progress::user_id,
+                            user_module_progress::lesson_id,
+                        ))
+                        .do_update()
+                        .set((
+                            user_module_progress::flashcards_done.eq(true),
+                            user_module_progress::updated_at.eq(now),
+                        ))
+                        .execute(conn)?;
+                    flashcards_done = true;
+                }
+            }
+
+            Ok(ProductionOutcome {
+                productions: next,
+                done_count,
+                total_count: total,
+                conversation_done: was_done || just_closed,
+                flashcards_done,
+            })
+        })
     })
     .await
 }

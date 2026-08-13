@@ -21,3 +21,36 @@ export function completeModuleConversation(lessonId: string, weakStructures: str
     body: { weak_structures: weakStructures },
   });
 }
+
+/** One structure's drill state, as the production endpoint reports it. */
+export type StructureProgress = {
+  target: string;
+  base: string;
+  productions: number;
+  done: boolean;
+};
+
+/** What one `record_production` call changed, and the module's new state. */
+export type ProductionResult = {
+  lesson_id: string;
+  target: string;
+  productions: number;
+  done_count: number;
+  total_count: number;
+  all_structures_done: boolean;
+  conversation_done: boolean;
+  flashcards_done: boolean;
+  structures: StructureProgress[];
+};
+
+/** Logs one correct production of the current module's structure — the
+ * tutor's `record_production` tool call. This is what makes module progress
+ * deterministic: the module's conversation closes automatically once every
+ * structure reaches its required productions. */
+export function recordProduction(lessonId: string, target: string) {
+  return apiRequest<ProductionResult>(`/api/modules/${lessonId}/production`, {
+    method: 'POST',
+    auth: true,
+    body: { target },
+  });
+}

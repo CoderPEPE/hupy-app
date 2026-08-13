@@ -162,11 +162,17 @@ pub struct LessonJson {
     pub steps: Vec<LessonStepJson>,
 }
 
-/// One chunk a module teaches: the target-language phrase and its translation.
+/// One chunk a module teaches: the target-language phrase and its translation,
+/// plus how far the learner has drilled it in the current conversation.
 #[derive(Serialize)]
 pub struct StructureJson {
     pub target: String,
     pub base: String,
+    /// How many times the learner has produced this structure correctly — the
+    /// per-module checkpoint that survives app restarts.
+    pub productions: i64,
+    /// True once `productions` reaches the module's requirement (3).
+    pub done: bool,
 }
 
 /// One module of the planet's ten-module path, with its per-user state.
@@ -447,6 +453,10 @@ async fn planet_detail(
     let module_progress =
         repositories::modules::progress_for_planet(&state.pool, user_id, planet_id).await?;
     let states = services::curriculum::module_states(&modules, &module_progress);
+    // The per-structure drill checkpoints for every module at once (one
+    // query, no N+1) — what the chat's progress bar is drawn from.
+    let structure_progress =
+        repositories::modules::structure_progress_for_planet(&state.pool, user_id, planet_id).await?;
     let mut lessons = Vec::with_capacity(modules.len());
     for (module, module_state) in modules.iter().zip(&states) {
         // Only the reachable modules need their card counts: a locked module
@@ -469,9 +479,17 @@ async fn planet_detail(
             focus: module.focus.clone(),
             structures: services::curriculum::structures(&module.structures)
                 .into_iter()
-                .map(|s| StructureJson {
-                    target: s.target,
-                    base: s.base,
+                .map(|s| {
+                    let p = structure_progress
+                        .get(&(module.id, s.target.clone()))
+                        .copied()
+                        .unwrap_or(0);
+                    StructureJson {
+                        target: s.target,
+                        base: s.base,
+                        productions: i64::from(p),
+                        done: p >= services::curriculum::REQUIRED_PRODUCTIONS as i32,
+                    }
                 })
                 .collect(),
             flashcards_total,
@@ -650,6 +668,27 @@ async fn master_sentence(
 
     if newly_mastered {
         services::gamification::touch_activity_and_award_xp(&state.pool, user_id, 8).await;
+        // Fallback path: a planet whose current module has no authored chunks
+        // teaches from its sentence list, so mastering every sentence is that
+        // module's completion condition (the authored path closes via
+        // `record_production` instead). Closing here keeps those modules from
+        // looping over the same sentences forever too.
+        let modules = repositories::modules::lessons_for(&state.pool, planet_id).await?;
+        let module_progress =
+            repositories::modules::progress_for_planet(&state.pool, user_id, planet_id).await?;
+        if let Some(current) = services::curriculum::current_module(&modules, &module_progress) {
+            if services::curriculum::structures(&current.structures).is_empty()
+                && mastered >= total
+            {
+                repositories::modules::complete_conversation(
+                    &state.pool,
+                    user_id,
+                    current.id,
+                    serde_json::json!([]),
+                )
+                .await?;
+            }
+        }
     }
 
     Ok(Json(serde_json::json!({

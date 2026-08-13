@@ -205,6 +205,15 @@ export const es: Translations = {
   'chat.hint.demoPause': 'Lección demo · toca para pausar',
   'chat.hint.demoResume': 'En pausa · toca para continuar',
 
+  // Chat — barra de progreso del módulo (solo en lecciones). Un segmento por
+  // frase, tres marcas cada: una por producción correcta, guardada en el
+  // servidor — cerrar la app retoma desde donde te quedaste.
+  'chat.moduleProgress': 'Módulo {{position}}',
+  'chat.moduleProgressComplete': 'Módulo {{position}} completo',
+  'chat.moduleProgressCount': '{{done}}/{{total}}',
+  'chat.moduleProgressNow': 'Ahora: “{{sentence}}”',
+  'chat.moduleProgressReview': 'Conversación completada: revisa tus tarjetas para abrir el siguiente módulo',
+
   // Chat — bottom composer (typed messages + one-tap voice send)
   'chat.input.placeholder': 'Escribe un mensaje…',
   'chat.input.send': 'Enviar mensaje',

@@ -15,13 +15,23 @@ use axum::extract::{Path, State};
 use axum::routing::post;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 pub fn router() -> Router<AppState> {
-    Router::new().route(
-        "/{lesson_id}/complete-conversation",
-        post(complete_conversation),
-    )
+    Router::new()
+        .route(
+            "/{lesson_id}/complete-conversation",
+            post(complete_conversation),
+        )
+        .route("/{lesson_id}/production", post(record_production))
+}
+
+#[derive(Deserialize)]
+pub struct RecordProduction {
+    /// The structure's target-language sentence, exactly as authored under
+    /// THIS MODULE — the one the learner just produced correctly.
+    pub target: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -111,4 +121,85 @@ async fn complete_conversation(
             .then(|| modules.get(index + 1).map(|m| m.id))
             .flatten(),
     }))
+}
+
+/// Logs one correct production of the current module's structure — the
+/// deterministic driver of module completion (see the CYCLE_PROMPT's
+/// `record_production` tool). The tutor calls it each time the learner
+/// produces the structure right; the count persists as the checkpoint; and
+/// once every structure reaches the required productions, the conversation
+/// half of the gate closes here, automatically, without trusting the model
+/// to remember `complete_module`.
+async fn record_production(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Path(lesson_id): Path<Uuid>,
+    Json(body): Json<RecordProduction>,
+) -> Result<Json<Value>> {
+    let module = repositories::modules::lesson(&state.pool, lesson_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("module not found"))?;
+
+    // Only the learner's *current* module may take productions — the tutor
+    // is told exactly which module it is teaching, and accepting any id
+    // would let a stray tool call (or a model that drifted) farm progress on
+    // modules that are locked.
+    let modules = repositories::modules::lessons_for(&state.pool, module.planet_id).await?;
+    let progress =
+        repositories::modules::progress_for_planet(&state.pool, user_id, module.planet_id).await?;
+    let current = services::curriculum::current_module(&modules, &progress);
+    if current.map(|m| m.id) != Some(lesson_id) {
+        return Err(AppError::conflict(
+            "this is not the module currently being studied",
+        ));
+    }
+
+    let structures = services::curriculum::structures(&module.structures);
+    let key = body.target.trim().to_string();
+    if !structures.iter().any(|s| s.target == key) {
+        return Err(AppError::bad_request(
+            "structure is not part of this module",
+        ));
+    }
+
+    let total = structures.len() as i64;
+    let outcome = repositories::modules::record_production(
+        &state.pool,
+        user_id,
+        lesson_id,
+        &key,
+        total,
+        services::curriculum::REQUIRED_PRODUCTIONS as i32,
+    )
+    .await?;
+
+    // The per-structure state that powers the app's progress bar, rebuilt
+    // from the same rows the next session's prompt will read — one source of
+    // truth for what the learner has done.
+    let counts =
+        repositories::modules::structure_progress(&state.pool, user_id, lesson_id).await?;
+    let structures_json: Vec<Value> = structures
+        .into_iter()
+        .map(|s| {
+            let p = counts.get(&s.target).copied().unwrap_or(0);
+            json!({
+                "target": s.target,
+                "base": s.base,
+                "productions": p,
+                "done": p >= services::curriculum::REQUIRED_PRODUCTIONS as i32,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "lesson_id": lesson_id,
+        "target": key,
+        "productions": outcome.productions,
+        "done_count": outcome.done_count,
+        "total_count": outcome.total_count,
+        "all_structures_done": outcome.done_count >= outcome.total_count,
+        "conversation_done": outcome.conversation_done,
+        "flashcards_done": outcome.flashcards_done,
+        "structures": structures_json,
+    })))
 }

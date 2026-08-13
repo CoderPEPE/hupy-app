@@ -152,7 +152,7 @@ function ExpandedPlanetCard({
   onCelebrationDone?: () => void;
 }) {
   const t = useT();
-  const { beginLesson } = useUiStore();
+  const { beginLesson, reviewModule } = useUiStore();
   // Only fetch the ten blocks while they are actually on screen.
   const { data: detail, isLoading } = usePlanet(open ? planet.id : undefined);
   const blocks = detail?.lessons ?? [];
@@ -204,7 +204,15 @@ function ExpandedPlanetCard({
           <Text style={styles.loadingBlocks}>{t('planets.loadingLessons')}</Text>
         ) : (
           blocks.map((block) => (
-            <BlockRow key={block.id} block={block} onPress={() => beginLesson(planet.id, block.id)} />
+            <BlockRow
+              key={block.id}
+              block={block}
+              onPress={() =>
+                block.state === 'flashcards_pending'
+                  ? reviewModule(block.id)
+                  : beginLesson(planet.id, block.id)
+              }
+            />
           ))
         ))}
     </View>

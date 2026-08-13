@@ -47,9 +47,11 @@ import {
   useMasterSentence,
   usePlanet,
   usePlanets,
+  useRecordProduction,
 } from '../api/hooks';
 import type { ProgressMetric } from '../api/planets';
 import type { RealtimeSessionMode } from '../api/realtime';
+import type { PlanetLesson } from '../types';
 import { localeTag, plural, useI18nStore, useT, type TranslationKey } from '../i18n';
 import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
@@ -63,6 +65,80 @@ import {
   type LessonCorrection,
   type LessonStepKind,
 } from '../types';
+
+// ---------------------------------------------------------------------------
+// Module drill progress (lesson chats only)
+// ---------------------------------------------------------------------------
+
+/** How many correct productions finish one structure — mirrors
+ * `REQUIRED_PRODUCTIONS` on the backend. */
+const PRODUCTIONS_REQUIRED = 3;
+
+/** The compact drill bar pinned under the header of a lesson chat: one
+ * segment per structure, three ticks each (one per correct production), the
+ * current structure highlighted. Drawn from the same server rows the next
+ * session's prompt resumes from, so the bar is the checkpoint made visible. */
+function ModuleProgressBar({ module }: { module: PlanetLesson }) {
+  const t = useT();
+  const structures = module.structures ?? [];
+  if (structures.length === 0) return null;
+
+  const total = structures.length * PRODUCTIONS_REQUIRED;
+  const done = structures.reduce(
+    (sum, s) => sum + Math.min(s.productions ?? 0, PRODUCTIONS_REQUIRED),
+    0,
+  );
+  // The module's conversation is behind the learner once its state moves off
+  // 'current' (flashcards pending, or fully completed).
+  const closed = module.state !== 'current';
+  const current = structures.find((s) => !s.done);
+
+  return (
+    <View style={styles.moduleProgress}>
+      <View style={styles.moduleProgressTop}>
+        <Text style={styles.moduleProgressTitle}>
+          {closed
+            ? t('chat.moduleProgressComplete', { position: module.position })
+            : t('chat.moduleProgress', { position: module.position })}
+        </Text>
+        <Text style={styles.moduleProgressCount}>
+          {t('chat.moduleProgressCount', { done, total })}
+        </Text>
+      </View>
+      <View style={styles.moduleProgressSegments}>
+        {structures.map((s) => (
+          <View key={s.target} style={styles.moduleProgressSegment}>
+            {Array.from({ length: PRODUCTIONS_REQUIRED }, (_, tick) => {
+              const filled = (s.productions ?? 0) > tick;
+              const isCurrent =
+                !closed && !filled && current?.target === s.target;
+              return (
+                <View
+                  key={tick}
+                  style={[
+                    styles.moduleProgressTick,
+                    filled && styles.moduleProgressTickFilled,
+                    isCurrent && styles.moduleProgressTickCurrent,
+                  ]}
+                />
+              );
+            })}
+          </View>
+        ))}
+      </View>
+      {current && !closed && (
+        <Text style={styles.moduleProgressNow} numberOfLines={1}>
+          {t('chat.moduleProgressNow', { sentence: current.target })}
+        </Text>
+      )}
+      {closed && (
+        <Text style={styles.moduleProgressNow} numberOfLines={1}>
+          {t('chat.moduleProgressReview')}
+        </Text>
+      )}
+    </View>
+  );
+}
 
 function CorrectionCard({
   correction,
@@ -187,6 +263,7 @@ export function ChatScreen() {
   const masterSentence = useMasterSentence();
   const bumpProgress = useBumpProgress();
   const confirmFlashcardMastery = useConfirmFlashcardMastery();
+  const logProduction = useRecordProduction();
   const { data: gamification } = useGamificationStats();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -195,6 +272,10 @@ export function ChatScreen() {
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [confettiKey, setConfettiKey] = useState(0);
   const [showMicPrimer, setShowMicPrimer] = useState(false);
+  // The module this session's tutor is teaching — captured when the session
+  // starts so the progress bar stays on it even after the module's
+  // conversation closes and the planet detail moves on to the next one.
+  const [sessionLessonId, setSessionLessonId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   // One backend conversation per session — created once, on mount.
@@ -291,6 +372,18 @@ export function ChatScreen() {
         });
         return { ok: true, flashcard_id: card.id };
       }
+      case 'record_production': {
+        const target = asOptionalString(args.target);
+        const lessonId = sessionLessonId ?? currentModule?.id;
+        if (!lessonId || !target) return { error: 'missing module or target' };
+        const result = await logProduction.mutateAsync({ lessonId, target });
+        return {
+          ok: true,
+          productions: result.productions,
+          all_structures_done: result.all_structures_done,
+          conversation_done: result.conversation_done,
+        };
+      }
       case 'complete_module': {
         if (!currentModule) return { error: 'no module in progress' };
         const weak = Array.isArray(args.weak_structures)
@@ -381,6 +474,10 @@ export function ChatScreen() {
    * module" and so opens the session on arrival. */
   const startConversation = async () => {
     await ensureConversation();
+    // Pin the bar to the module this session is teaching — if it closes
+    // mid-session the planet detail advances to the next module, and the bar
+    // must still show the one that just finished.
+    if (chatMode === 'lesson' && currentModule) setSessionLessonId(currentModule.id);
     voice.start();
   };
 
@@ -543,6 +640,14 @@ export function ChatScreen() {
       ? t('chat.speakPrompt')
       : t('chat.listenPrompt');
 
+  // The module this session's tutor teaches, for the drill bar — pinned at
+  // session start (see `startConversation`) so it doesn't jump to the next
+  // module the moment the current one's conversation closes.
+  const progressModule =
+    (sessionLessonId
+      ? planetDetail?.lessons.find((l) => l.id === sessionLessonId)
+      : currentModule) ?? null;
+
   // The last few messages, rendered as compact chat bubbles above the globe.
   const recentMessages = messages.slice(-10);
   // The tutor's latest real utterance — emphasized as the phrase to repeat.
@@ -593,6 +698,12 @@ export function ChatScreen() {
           <Sparkles size={14} color="#8A6D00" />
           <Text style={styles.unlockBannerText}>{unlockNotice}</Text>
         </Pressable>
+      )}
+
+      {/* The lesson's drill bar: how far through this module the learner is,
+          drawn from the server checkpoint. Only lesson chats get one. */}
+      {chatMode === 'lesson' && progressModule && progressModule.structures.length > 0 && (
+        <ModuleProgressBar module={progressModule} />
       )}
 
       {showHistory ? (
@@ -971,6 +1082,60 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#8A6D00',
+  },
+  moduleProgress: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  moduleProgressTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  moduleProgressTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  moduleProgressCount: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.primary,
+  },
+  moduleProgressSegments: {
+    flexDirection: 'row',
+    marginTop: 8,
+    gap: 6,
+  },
+  moduleProgressSegment: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 3,
+  },
+  moduleProgressTick: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.border,
+  },
+  moduleProgressTickFilled: {
+    backgroundColor: colors.primary,
+  },
+  moduleProgressTickCurrent: {
+    backgroundColor: colors.primarySoft,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  moduleProgressNow: {
+    marginTop: 8,
+    fontSize: 12,
+    color: colors.textMuted,
   },
   transcript: {
     flex: 1,

@@ -22,7 +22,7 @@ import { displayName } from '../utils/userName';
 export function HomeScreen() {
   const t = useT();
   const user = useAuthStore((s) => s.user);
-  const { openPlanet, beginLesson, setTab } = useUiStore();
+  const { openPlanet, beginLesson, reviewModule, setTab } = useUiStore();
   const { data: planets = [], isLoading } = usePlanets();
   const { data: cards = [] } = useFlashcards();
   const { data: stories = [] } = useStories();
@@ -43,7 +43,10 @@ export function HomeScreen() {
   const continueLearning = () => {
     if (!activePlanet) return;
     if (nextLesson) {
-      beginLesson(activePlanet.id, nextLesson.id);
+      // A module that is only waiting on its cards is reviewed on the
+      // Flashcards tab — the next module does not open until they are done.
+      if (nextLesson.state === 'flashcards_pending') reviewModule(nextLesson.id);
+      else beginLesson(activePlanet.id, nextLesson.id);
     } else {
       openPlanet(activePlanet.id);
     }

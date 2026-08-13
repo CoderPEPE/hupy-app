@@ -701,7 +701,7 @@ export function PlanetsScreen() {
   const insets = useSafeAreaInsets();
   const t = useT();
   const { width } = useWindowDimensions();
-  const { beginLesson, closePlanet, selectedPlanetId } = useUiStore();
+  const { beginLesson, closePlanet, reviewModule, selectedPlanetId } = useUiStore();
   const { data: planets = [], isLoading } = usePlanets();
 
   const initialIndex = Math.max(0, planets.findIndex((p) => p.id === selectedPlanetId));
@@ -760,6 +760,14 @@ export function PlanetsScreen() {
   // A module waiting on its flashcards is where the learner must go next —
   // the path does not open past it.
   const reviewBlock = lessons.find((l) => l.state === 'flashcards_pending') ?? null;
+
+  // A module waiting on its cards is reviewed on the Flashcards tab, not in
+  // another chat lesson — both the row pill and the sticky CTA land there.
+  const openLesson = (lesson: PlanetLesson | null) => {
+    if (!lesson) return;
+    if (lesson.state === 'flashcards_pending') reviewModule(lesson.id);
+    else beginLesson(planet?.id ?? '', lesson.id);
+  };
   const locked = planet?.status === 'locked';
 
   const stars = useMemo(() => starsFor(7, 46), []);
@@ -997,7 +1005,7 @@ export function PlanetsScreen() {
                       key={l.id}
                       lesson={l}
                       isLast={i === lessons.length - 1}
-                      onPress={() => beginLesson(planet.id, l.id)}
+                      onPress={() => openLesson(l)}
                     />
                   ))}
                   {lessons.length === 0 && (
@@ -1018,7 +1026,7 @@ export function PlanetsScreen() {
           <GradientCta
             label={continueLabel}
             disabled={!continueReady}
-            onPress={() => beginLesson(planet.id, continueTarget?.id ?? '')}
+            onPress={() => openLesson(continueTarget)}
           />
         </View>
       )}

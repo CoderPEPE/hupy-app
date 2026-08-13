@@ -1,6 +1,6 @@
 use crate::schema::{
-    lesson_steps, planet_lessons, planet_sentences, planets, user_module_progress,
-    user_planet_progress,
+    lesson_steps, module_structure_progress, planet_lessons, planet_sentences, planets,
+    user_module_progress, user_planet_progress,
 };
 use chrono::{DateTime, Utc};
 use diesel::{Queryable, Selectable};
@@ -267,4 +267,18 @@ impl ModuleProgress {
     pub fn completed(&self) -> bool {
         self.conversation_done && self.flashcards_done
     }
+}
+
+/// The learner's production count for one structure of a module — the
+/// checkpoint that makes a module conversation resume where it stopped and
+/// close deterministically once every structure has been produced enough
+/// times. Keyed by the structure's target text (see the migration comment).
+#[derive(Debug, Queryable, Selectable)]
+#[diesel(table_name = module_structure_progress)]
+pub struct ModuleStructureProgress {
+    pub user_id: Uuid,
+    pub lesson_id: Uuid,
+    pub structure_key: String,
+    pub productions: i32,
+    pub updated_at: DateTime<Utc>,
 }

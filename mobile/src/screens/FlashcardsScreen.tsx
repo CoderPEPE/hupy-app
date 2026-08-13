@@ -394,8 +394,15 @@ export function FlashcardsScreen() {
   const deckCards = cards.filter((c) => inDeck(c) && (showLearned ? !c.due : c.due));
   const dueCount = cards.filter((c) => inDeck(c) && c.due).length;
   const dueTotal = cards.filter((c) => c.due).length;
-  const planetName = (id: string | null) =>
-    id ? planets.find((p) => p.id === id)?.title ?? t('flashcards.planetFallback') : t('flashcards.allCards');
+  const planetName = (id: string | null) => {
+    if (!id) return t('flashcards.allCards');
+    const asPlanet = planets.find((p) => p.id === id);
+    if (asPlanet) return asPlanet.title;
+    // A module's review deck (opened via "Start review") is titled by the
+    // module itself, not the generic planet fallback.
+    const asModule = activeDetail?.lessons?.find((l) => l.id === id);
+    return asModule?.title ?? t('flashcards.planetFallback');
+  };
 
   useEffect(() => {
     Animated.timing(flip, {

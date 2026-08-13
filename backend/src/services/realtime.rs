@@ -92,17 +92,21 @@ echoing you) — cite the sentence's id exactly as given below.\n\
 conversation ability, listening comprehension, or review performance this turn — don't inflate it.\n\
 - Call confirm_flashcard_mastery when a \"pending re-check\" flashcard below comes up naturally in conversation \
 and they get it right without help.\n\
-- Call complete_module ONLY when every structure of THIS MODULE has been produced correctly at least three \
-times, with variation — not three identical echoes. Pass the structures they kept getting wrong as \
-weak_structures so later modules can bring them back. Do not call it early to be kind: the module is how \
-their progress is measured, and calling it early skips content they have not learned.\n\
+- Call record_production with the exact target sentence of the CURRENT structure every time they produce \
+it correctly. The system keeps these counts as the module's checkpoint: three correct productions finish a \
+structure, and once every structure of THIS MODULE has its three, the module's conversation closes \
+automatically — you do not need to call complete_module, and doing so after the close is an error. A \
+structure that has reached its count is DONE: never drill it again in full, at most one quick recall check.\n\
 \n\
 Staying on the module:\n\
 - If they ask a question about the language, answer it briefly, then return to the practice in the same turn \
 (\"... Now, back to our module — how do you say ...?\").\n\
 - If they change the subject entirely, acknowledge it in a sentence, then bring them back to the module.\n\
 - Never start teaching a structure that is not listed under THIS MODULE. If they ask for one, tell them it is \
-coming in a later module and return to the current practice.";
+coming in a later module and return to the current practice.\n\
+- Work through THIS MODULE's structures strictly in the order they are listed, and move on the moment the \
+current one reaches its required productions. Never go back to re-drill a finished structure from scratch \
+and never restart the module once it is closed — that is the loop the checkpoint exists to prevent.";
 
 /// The tutor's method prompt for the FREE conversation session (the Chat tab
 /// with no lesson/planet context). Same voice and personality, same
@@ -195,6 +199,20 @@ pub fn tool_schemas(target: &str, base: &str, include_progress: bool) -> Vec<Val
         }),
     ];
     if include_progress {
+        tools.push(
+            json!({
+                "type": "function",
+                "name": "record_production",
+                "description": format!("Records that the learner just produced the current structure correctly. Call it once per correct production, citing the exact {target} sentence as listed under THIS MODULE. The system counts these and closes the module automatically once every structure reaches its required count (3) — this count is the module's checkpoint, so it also survives app restarts."),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target": {"type": "string", "description": format!("The exact {target} sentence from THIS MODULE's list that the learner just produced")}
+                    },
+                    "required": ["target"]
+                }
+            }),
+        );
         tools.push(
             json!({
                 "type": "function",
@@ -481,14 +499,40 @@ async fn build_instructions_for(
                 for s in &sentences {
                     out.push_str(&format!("- {} — {} — [{}]\n", s.en, s.pt, s.id));
                 }
+                out.push_str(
+                    "This module has no authored chunk list, so teach from the planet's sentences \
+                     above. Call master_sentence (citing the id) once they produce a sentence \
+                     unaided; when every sentence above is mastered, the module's conversation \
+                     closes automatically.\n",
+                );
             } else {
+                let counts =
+                    repositories::modules::structure_progress(pool, user_id, module.id).await?;
+                let required = services::curriculum::REQUIRED_PRODUCTIONS;
                 out.push_str(&format!(
                     "Structures to teach — every one of these, and nothing beyond them \
-                     ({target_name} — {base_name}):\n"
+                     ({target_name} — {base_name} — productions):\n"
                 ));
-                for s in &structures {
-                    out.push_str(&format!("- {} — {}\n", s.target, s.base));
+                for (i, s) in structures.iter().enumerate() {
+                    let p = counts.get(&s.target).copied().unwrap_or(0);
+                    let done = p >= required as i32;
+                    out.push_str(&format!(
+                        "- {}. {} — {} — {}/{} {}\n",
+                        i + 1,
+                        s.target,
+                        s.base,
+                        p.min(required as i32),
+                        required,
+                        if done { "DONE" } else { "to go" },
+                    ));
                 }
+                out.push_str(
+                    "\nCHECKPOINT — these counts are the learner's real, saved progress (they \
+                     survive app restarts). Resume from the first structure below 3/3 and work \
+                     strictly in order. Structures marked DONE are finished: never restart their \
+                     drill, at most one quick recall check. When the last structure reaches 3/3 \
+                     the module's conversation closes automatically.\n",
+                );
             }
 
             // The other half of the gate, in the tutor's own briefing: what
@@ -691,11 +735,37 @@ mod learner_name_tests {
         assert!(names.contains(&"confirm_flashcard_mastery"));
         assert!(!names.contains(&"master_sentence"));
         assert!(!names.contains(&"bump_progress"));
+        assert!(!names.contains(&"record_production"));
 
         let lesson = super::tool_schemas("English", "Portuguese", true);
         let names: Vec<&str> = lesson.iter().filter_map(|t| t["name"].as_str()).collect();
+        assert!(names.contains(&"record_production"));
         assert!(names.contains(&"master_sentence"));
         assert!(names.contains(&"bump_progress"));
+    }
+
+    /// The lesson prompt must never tell the tutor to close the module by
+    /// hand — completion is deterministic, driven by record_production, so
+    /// the old self-assessed complete_module instruction must not survive.
+    #[test]
+    fn the_prompt_closes_modules_deterministically_via_production_counts() {
+        let rendered = super::CYCLE_PROMPT
+            .replace("{{LEARNER}}", "Ana")
+            .replace("{{TARGET_LANG}}", "English")
+            .replace("{{BASE_LANG}}", "Portuguese");
+        assert!(rendered.contains("record_production"), "the tutor logs productions");
+        assert!(
+            rendered.contains("closes automatically"),
+            "completion is the system's job, not the model's"
+        );
+        assert!(
+            !rendered.contains("Call complete_module ONLY"),
+            "no more self-assessed completion gate"
+        );
+        assert!(
+            rendered.contains("Never go back to re-drill a finished structure"),
+            "the anti-loop rule is explicit"
+        );
     }
 
     /// The free-conversation prompt must not promise a curriculum it cannot

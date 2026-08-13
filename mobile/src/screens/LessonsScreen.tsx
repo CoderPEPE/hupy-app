@@ -59,7 +59,7 @@ function LessonRow({ lesson, onPress }: { lesson: PlanetLesson; onPress: () => v
 
 function PlanetLessonsSection({ planet }: { planet: Planet }) {
   const t = useT();
-  const { beginLesson } = useUiStore();
+  const { beginLesson, reviewModule } = useUiStore();
   const { data: detail, isLoading } = usePlanet(planet.id);
   const locked = planet.status === 'locked';
   const mastery = Math.round((planet.progress?.mastery ?? 0) * 100);
@@ -84,7 +84,16 @@ function PlanetLessonsSection({ planet }: { planet: Planet }) {
         <Text style={styles.loadingText}>{t('planets.loadingLessons')}</Text>
       ) : (
         detail.lessons.map((lesson) => (
-          <LessonRow key={lesson.id} lesson={lesson} onPress={() => beginLesson(planet.id, lesson.id)} />
+          <LessonRow
+            key={lesson.id}
+            lesson={lesson}
+            // A module waiting on its cards is reviewed on the Flashcards tab.
+            onPress={() =>
+              lesson.state === 'flashcards_pending'
+                ? reviewModule(lesson.id)
+                : beginLesson(planet.id, lesson.id)
+            }
+          />
         ))
       )}
     </View>

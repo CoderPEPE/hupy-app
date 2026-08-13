@@ -57,7 +57,7 @@ const RESPONSE_START_GRACE_MS = 150;
  * coming out of the speaker. Android needs longer because it mutes the whole
  * turn anyway; iOS only needs to cover the playback tail.
  */
-const POST_SPEECH_MUTE_IOS_MS = 150;
+const POST_SPEECH_MUTE_IOS_MS = 400;
 
 // ---------------------------------------------------------------------------
 // Echo gate
@@ -76,14 +76,6 @@ const POST_SPEECH_MUTE_IOS_MS = 150;
 // chopped up mid-sentence.
 // ---------------------------------------------------------------------------
 
-/** Smoothing for the running estimate of the echo level (0..1, higher = faster). */
-const ECHO_FLOOR_ALPHA = 0.15;
-/** How much louder than the observed echo floor speech must be to count. */
-const ECHO_GATE_MARGIN = 2.5;
-/** Absolute floor, so near-silence can never open the gate. */
-const ECHO_GATE_MIN_RMS = 0.02;
-/** Consecutive qualifying frames (~100 ms each) required to open the gate. */
-const ECHO_GATE_FRAMES = 2;
 
 // Only used if the backend is too old to return the canonical instructions.
 // Intentionally names no one: the backend personalizes the real prompt with
@@ -180,20 +172,9 @@ export function useVoiceConversation(
   const openingTurnRef = useRef(false);
 
   // --- Echo gate state (see the constants above) --------------------------
-  /** Running estimate of the mic level attributable to speaker echo. */
-  const echoFloorRef = useRef(0);
-  /** True once the user has clearly spoken over the tutor this turn. */
-  const echoGateOpenRef = useRef(false);
-  /** Consecutive frames currently above the gate threshold. */
-  const gateStreakRef = useRef(0);
 
   /** Called at the start of each tutor turn: nothing has been attributed to
    * the user yet, and the echo level is unknown again. */
-  const resetEchoGate = () => {
-    echoGateOpenRef.current = false;
-    gateStreakRef.current = 0;
-    echoFloorRef.current = 0;
-  };
 
   const setConversationStatus = (next: ConversationStatus) => {
     statusRef.current = next;
@@ -261,10 +242,17 @@ async function ensureMicPermission(): Promise<boolean> {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
+    // Half-duplex: while the tutor is speaking — or its audio is still coming
+    // out of the speaker — the microphone is not forwarded at all, on any
+    // platform. iOS used to stay open mid-turn and lean on hardware echo
+    // cancellation plus a loudness heuristic, which the Simulator does not
+    // have and a loud speaker defeats: the tutor heard itself, "interrupted"
+    // itself, answered the interruption, and looped. To interrupt, tap the
+    // mic button, which stops playback first.
     const dropped =
-      Platform.OS === 'ios'
-        ? Date.now() < micUnmuteAtRef.current
-        : statusRef.current === 'speaking' || Date.now() < micUnmuteAtRef.current;
+      statusRef.current === 'speaking' ||
+      realtimeAudioPlayer.getRemainingPlaybackMs() > 0 ||
+      Date.now() < micUnmuteAtRef.current;
     const stats = micStatsRef.current;
     if (dropped) {
       stats.dropped += 1;
@@ -298,31 +286,6 @@ async function ensureMicPermission(): Promise<boolean> {
     // otherwise the wave would show our own echo.
     if (statusRef.current !== 'speaking') {
       audioLevels.publish(micRms, 'mic');
-    }
-
-    // While the tutor is talking, only forward audio that is clearly louder
-    // than the echo we are hearing from our own speaker — otherwise the
-    // server's VAD treats the tutor's voice as an interruption and the
-    // conversation loops (see the echo-gate notes above).
-    if (statusRef.current === 'speaking' && !echoGateOpenRef.current) {
-      const level = micRms;
-      const threshold = Math.max(ECHO_GATE_MIN_RMS, echoFloorRef.current * ECHO_GATE_MARGIN);
-      if (level > threshold) {
-        gateStreakRef.current += 1;
-        if (gateStreakRef.current >= ECHO_GATE_FRAMES) {
-          echoGateOpenRef.current = true;
-          debugLog('[voice] echo gate opened — treating as real barge-in');
-        }
-      } else {
-        gateStreakRef.current = 0;
-        // Only adapt the floor while we believe we're hearing echo, so the
-        // user's own voice can't inflate the threshold against them.
-        echoFloorRef.current += (level - echoFloorRef.current) * ECHO_FLOOR_ALPHA;
-      }
-      if (!echoGateOpenRef.current) {
-        stats.dropped += 1;
-        return;
-      }
     }
 
     const resampled = resample(samples, RECORD_RATE, TARGET_RATE);
@@ -431,11 +394,11 @@ async function ensureMicPermission(): Promise<boolean> {
         // automatic on iOS once real mic audio reaches the server mid-turn,
         // or from a manual tap-to-interrupt on either platform).
         //
-        // If the tutor is mid-turn and the echo gate never opened, we know we
-        // forwarded no user speech, so whatever the server detected can only
-        // be our own playback leaking into the mic. Honouring it there is
-        // exactly what caused the interrupt/answer/interrupt loop.
-        if (statusRef.current === 'speaking' && !echoGateOpenRef.current) {
+        // No mic audio is forwarded while the tutor is audible, so anything
+        // the server detects then can only be our own playback leaking into
+        // the microphone. Honouring it is exactly what caused the
+        // interrupt/answer/interrupt loop.
+        if (statusRef.current === 'speaking') {
           debugLog('[voice] ignoring speech_started — attributed to speaker echo');
           break;
         }
@@ -472,8 +435,7 @@ async function ensureMicPermission(): Promise<boolean> {
           debugLog('[voice] tutor speaking starts');
           // New turn: re-learn the echo level and require the user to prove
           // they're really talking before we forward audio again.
-          resetEchoGate();
-          setConversationStatus('speaking');
+                setConversationStatus('speaking');
           if (Platform.OS === 'ios') {
             micUnmuteAtRef.current = Date.now() + RESPONSE_START_GRACE_MS;
           }
@@ -498,8 +460,7 @@ async function ensureMicPermission(): Promise<boolean> {
           realtimeAudioPlayer.getRemainingPlaybackMs(),
           ')',
         );
-        resetEchoGate();
-        setConversationStatus(recordEnabledRef.current ? 'listening' : 'connected');
+            setConversationStatus(recordEnabledRef.current ? 'listening' : 'connected');
         break;
       }
 
@@ -574,7 +535,6 @@ async function ensureMicPermission(): Promise<boolean> {
     if (statusRef.current !== 'speaking') return;
     await realtimeAudioPlayer.clear();
     micUnmuteAtRef.current = 0;
-    resetEchoGate();
     ws.send(JSON.stringify({ type: 'response.cancel' }));
     setConversationStatus(recordEnabledRef.current ? 'listening' : 'connected');
   }, []);
@@ -613,7 +573,6 @@ async function ensureMicPermission(): Promise<boolean> {
     setMessages([]);
     openingTurnRef.current = false;
     pendingToolCallsRef.current.clear();
-    resetEchoGate();
     recordEnabledRef.current = withMic;
 
     if (withMic) {

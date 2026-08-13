@@ -207,6 +207,15 @@ export const en = {
   'chat.hint.demoPause': 'Demo lesson · tap to pause',
   'chat.hint.demoResume': 'Paused · tap to resume',
 
+  // Chat — the module drill bar (lesson chats only). One segment per
+  // structure, three ticks each: one per correct production, saved on the
+  // server so closing the app resumes where you left off.
+  'chat.moduleProgress': 'Module {{position}}',
+  'chat.moduleProgressComplete': 'Module {{position}} complete',
+  'chat.moduleProgressCount': '{{done}}/{{total}}',
+  'chat.moduleProgressNow': 'Now: “{{sentence}}”',
+  'chat.moduleProgressReview': 'Conversation done — review your cards to open the next module',
+
   // Chat — bottom composer (typed messages + one-tap voice send)
   'chat.input.placeholder': 'Type a message…',
   'chat.input.send': 'Send message',

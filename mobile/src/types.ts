@@ -117,6 +117,11 @@ export type BlockState = 'locked' | 'current' | 'flashcards_pending' | 'complete
 export type Structure = {
   target: string;
   base: string;
+  /** How many times the learner has produced it correctly in the current
+   * module conversation — the checkpoint that survives app restarts. */
+  productions: number;
+  /** True once `productions` reaches the module's requirement (3). */
+  done: boolean;
 };
 
 /** One module of the planet's ten-module path. */

@@ -4,8 +4,55 @@
 
 mod common;
 
-use common::{app, register, request, unique_email};
+use common::{app, pool, register, request, unique_email};
+use huppy_backend::repositories;
 use serde_json::json;
+
+/// Gives a module an authored chunk list (what the `seed_curriculum` binary
+/// writes in production) so the record_production flow has structures to
+/// count. The plain seed only creates empty `structures` arrays.
+async fn author_structures(lesson_id: &str) {
+    repositories::modules::set_curriculum(
+        pool(),
+        lesson_id.parse().unwrap(),
+        "Module 1",
+        "Build sentences.",
+        "focus:greetings",
+        json!([
+            {"target": "Good morning.", "base": "Bom dia."},
+            {"target": "I am fine.", "base": "Estou bem."},
+        ]),
+    )
+    .await
+    .expect("seed module structures");
+}
+
+/// Drives the tutor's `record_production` loop for one target: `times`
+/// correct productions, returning the last response body.
+async fn produce(
+    app: &common::Router,
+    token: &str,
+    lesson_id: &str,
+    target: &str,
+    times: usize,
+    ip: &str,
+) -> serde_json::Value {
+    let mut body = serde_json::Value::Null;
+    for _ in 0..times {
+        let (status, b) = request(
+            app,
+            "POST",
+            &format!("/api/modules/{lesson_id}/production"),
+            Some(token),
+            Some(json!({ "target": target })),
+            ip,
+        )
+        .await;
+        assert_eq!(status.as_u16(), 200, "production {target}: {b}");
+        body = b;
+    }
+    body
+}
 
 /// The planet's modules, with each one's state.
 async fn modules(app: &common::Router, token: &str, planet_id: &str, ip: &str) -> Vec<serde_json::Value> {
@@ -102,6 +149,123 @@ async fn the_next_module_waits_for_the_flashcards() {
     assert_eq!(list[0]["state"], "completed");
     assert_eq!(list[1]["state"], "current", "module 2 is now open");
     assert_eq!(list[2]["state"], "locked");
+}
+
+/// The deterministic core of the fix: productions are counted per structure,
+/// the count persists (the checkpoint), and the module's conversation closes
+/// automatically the moment the last structure reaches its third correct
+/// production — no reliance on the model remembering to call complete_module.
+#[tokio::test]
+async fn three_productions_finish_each_structure_and_close_the_module() {
+    let app = app(30, 120);
+    let token = register(&app, &unique_email("mod-prod")).await;
+    let (_, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.65.1").await;
+    let p1 = planets[0]["id"].as_str().unwrap().to_string();
+    let list = modules(&app, &token, &p1, "10.0.65.2").await;
+    let m1_id = list[0]["id"].as_str().unwrap().to_string();
+    author_structures(&m1_id).await;
+
+    // First production of the first structure: count 1, module still open.
+    let body = produce(&app, &token, &m1_id, "Good morning.", 1, "10.0.65.3").await;
+    assert_eq!(body["productions"], 1);
+    assert_eq!(body["done_count"], 0);
+    assert_eq!(body["all_structures_done"], false);
+    assert_eq!(body["conversation_done"], false);
+
+    // Two more productions on the same structure finish it…
+    let body = produce(&app, &token, &m1_id, "Good morning.", 2, "10.0.65.4").await;
+    assert_eq!(body["productions"], 3, "capped at the requirement");
+    assert_eq!(body["done_count"], 1);
+    assert_eq!(body["conversation_done"], false, "one of two structures is not enough");
+
+    // …and a re-call on a finished structure must not farm an endless count.
+    let body = produce(&app, &token, &m1_id, "Good morning.", 1, "10.0.65.5").await;
+    assert_eq!(body["productions"], 3, "stays capped at 3");
+    assert_eq!(body["done_count"], 1);
+
+    // The planet detail exposes the checkpoint to the app's progress bar.
+    let (_, detail) = request(&app, "GET", &format!("/api/planets/{p1}"), Some(&token), None, "10.0.65.6").await;
+    let s0 = &detail["lessons"][0]["structures"][0];
+    assert_eq!(s0["target"], "Good morning.");
+    assert_eq!(s0["productions"], 3);
+    assert_eq!(s0["done"], true);
+
+    // Drilling the second structure 3 times closes the conversation.
+    let body = produce(&app, &token, &m1_id, "I am fine.", 3, "10.0.65.7").await;
+    assert_eq!(body["all_structures_done"], true);
+    assert_eq!(body["conversation_done"], true, "module closes automatically");
+    assert_eq!(body["flashcards_done"], true, "no cards minted, nothing to review");
+
+    let list = modules(&app, &token, &p1, "10.0.65.8").await;
+    assert_eq!(list[0]["state"], "completed");
+    assert_eq!(list[1]["state"], "current", "module 2 opens");
+}
+
+/// The checkpoint really is the resume point: a fresh conversation reads the
+/// same persisted counts, so a learner who closes the app mid-module does not
+/// start over from the first sentence.
+#[tokio::test]
+async fn productions_survive_a_restart_and_resume_at_the_checkpoint() {
+    let app = app(30, 120);
+    let token = register(&app, &unique_email("mod-resume")).await;
+    let (_, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.66.1").await;
+    let p1 = planets[0]["id"].as_str().unwrap().to_string();
+    let list = modules(&app, &token, &p1, "10.0.66.2").await;
+    let m1_id = list[0]["id"].as_str().unwrap().to_string();
+    author_structures(&m1_id).await;
+
+    produce(&app, &token, &m1_id, "Good morning.", 2, "10.0.66.3").await;
+
+    // "Closing the app": a brand-new request path (fresh detail fetch) sees
+    // 2/3 on the first structure and zero on the second.
+    let (_, detail) = request(&app, "GET", &format!("/api/planets/{p1}"), Some(&token), None, "10.0.66.4").await;
+    let structures = detail["lessons"][0]["structures"].as_array().unwrap().clone();
+    assert_eq!(structures[0]["productions"], 2);
+    assert_eq!(structures[0]["done"], false);
+    assert_eq!(structures[1]["productions"], 0);
+    assert_eq!(structures[1]["done"], false);
+
+    // One more production resumes exactly where they left off.
+    let body = produce(&app, &token, &m1_id, "Good morning.", 1, "10.0.66.5").await;
+    assert_eq!(body["productions"], 3);
+    assert_eq!(body["done_count"], 1);
+}
+
+/// The tutor may only log productions for the module it is actually teaching;
+/// a structure that is not in the module (or a locked module) is rejected.
+#[tokio::test]
+async fn productions_are_scoped_to_the_current_modules_own_structures() {
+    let app = app(30, 120);
+    let token = register(&app, &unique_email("mod-scope")).await;
+    let (_, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.67.1").await;
+    let p1 = planets[0]["id"].as_str().unwrap().to_string();
+    let list = modules(&app, &token, &p1, "10.0.67.2").await;
+    let m1_id = list[0]["id"].as_str().unwrap().to_string();
+    author_structures(&m1_id).await;
+
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/api/modules/{m1_id}/production"),
+        Some(&token),
+        Some(json!({ "target": "I can fly." })),
+        "10.0.67.3",
+    )
+    .await;
+    assert_eq!(status.as_u16(), 400, "{body}");
+
+    // A locked module (module 2) refuses productions entirely.
+    let m5_id = list[4]["id"].as_str().unwrap().to_string();
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/api/modules/{m5_id}/production"),
+        Some(&token),
+        Some(json!({ "target": "Good morning." })),
+        "10.0.67.4",
+    )
+    .await;
+    assert_eq!(status.as_u16(), 409, "{body}");
 }
 
 /// A module with no cards has nothing to review — it must not strand the
