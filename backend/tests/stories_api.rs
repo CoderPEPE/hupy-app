@@ -160,6 +160,31 @@ async fn a_conquered_planet_plays_its_seeded_story() {
         "planet must be conquered first: {check}"
     );
 
+    // The story's real gate is the ten modules, not the mastery average —
+    // work through them the way the learner would.
+    let (_, detail) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{p1}"),
+        Some(&token),
+        None,
+        "10.0.43.13",
+    )
+    .await;
+    for module in detail["lessons"].as_array().unwrap() {
+        let id = module["id"].as_str().unwrap();
+        let (status, body) = request(
+            &app,
+            "POST",
+            &format!("/api/modules/{id}/complete-conversation"),
+            Some(&token),
+            None,
+            "10.0.43.14",
+        )
+        .await;
+        assert_eq!(status.as_u16(), 200, "{body}");
+    }
+
     // No generation step: the seeded story is simply there, ready to play.
     let (_, list) = request(&app, "GET", "/api/stories", Some(&token), None, "10.0.43.9").await;
     let entry = list

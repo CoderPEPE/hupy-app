@@ -266,10 +266,14 @@ async fn write_story(
         // erroring, which can leave a 3-minute story on a 15-minute planet.
         // Reject it here so the planet stays unseeded and the next run retries
         // it, instead of the short version silently becoming the final one.
+        // A few percent under the band is a rounding difference, not a
+        // truncated story — rejecting a 15m50s story for a 16m floor would
+        // burn a full regeneration on ten seconds.
         let floor = i64::from(services::stories::target_minutes(planet).0) * 60;
-        if story.duration_secs < floor {
+        let tolerated = floor * 95 / 100;
+        if story.duration_secs < tolerated {
             return Err(format!(
-                "story came out short: {}s, needs at least {floor}s",
+                "story came out short: {}s, needs at least {tolerated}s",
                 story.duration_secs
             ));
         }

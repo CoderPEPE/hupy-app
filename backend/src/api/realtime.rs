@@ -7,10 +7,13 @@ use crate::services;
 use crate::state::AppState;
 use axum::extract::State;
 use axum::middleware;
+use axum::body::Bytes;
+use axum::extract::Json;
 use axum::routing::post;
-use axum::{Json, Router};
-use serde::Serialize;
+use axum::Router;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use uuid::Uuid;
 
 pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
@@ -48,14 +51,33 @@ struct SessionAudioOutput {
     voice: String,
 }
 
+/// Optional session-scope hint carried by the client-secret request. The
+/// body is entirely optional (the original no-body call still means "the
+/// planet-scoped tutor session") — the mobile app sends it only when it
+/// wants a free conversation.
+#[derive(Deserialize, Default)]
+pub struct ClientSecretRequest {
+    /// `"generic"` → a free conversation with no planet scope. Any other
+    /// value (or absent) → the planet-scoped tutor session.
+    #[serde(default)]
+    pub mode: Option<String>,
+    /// Optional planet to scope a lesson session to; defaults to the
+    /// learner's active planet.
+    #[serde(default)]
+    pub planet_id: Option<Uuid>,
+}
+
 /// Mints a short-lived OpenAI Realtime client secret so the mobile app can
-/// connect to the Realtime API without ever seeing our API key. The session
-/// is scoped to the user's current active planet and carries tool
-/// definitions so the model can record corrections, flashcards, and
-/// progress as the conversation actually happens.
+/// connect to the Realtime API without ever seeing our API key. By default
+/// the session is scoped to the learner's active planet (or the requested
+/// `planet_id`) and carries tool definitions so the model can record
+/// corrections, flashcards, and progress as the conversation actually
+/// happens. With `mode: "generic"` it becomes a free conversation: same
+/// tutor, no curriculum context, and no planet-dependent progress tools.
 async fn client_secret(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
+    body: Bytes,
 ) -> Result<Json<Value>> {
     if state.openai_api_key().is_empty() {
         return Err(AppError::internal(
@@ -63,12 +85,25 @@ async fn client_secret(
         ));
     }
 
+    // Truly optional: the app posts no body at all for a lesson session, and
+    // `Option<Json<_>>` still rejects an empty body when a JSON content-type
+    // is set — which turned "mint me a session" into a 400.
+    let body: ClientSecretRequest = if body.is_empty() {
+        ClientSecretRequest::default()
+    } else {
+        serde_json::from_slice(&body)
+            .map_err(|e| AppError::bad_request(format!("invalid body: {e}")))?
+    };
+    let generic = body.mode.as_deref() == Some("generic");
+
     // One pass builds the instructions, the course voice and the language
     // names (a single user lookup) — see `TutorSession`.
-    let session = services::realtime::build_session(&state.pool, user_id).await?;
+    let session =
+        services::realtime::build_session(&state.pool, user_id, body.planet_id, generic).await?;
     let instructions = session.instructions.clone();
     let voice = session.voice;
-    let tools = services::realtime::tool_schemas(session.target_name, session.base_name);
+    let tools =
+        services::realtime::tool_schemas(session.target_name, session.base_name, !session.generic);
 
     let body = SessionRequest {
         session: SessionConfig {

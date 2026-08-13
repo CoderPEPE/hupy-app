@@ -72,6 +72,9 @@ sentence, then have them say it.\n\
 7) As they improve, shift from explaining in {{BASE_LANG}} to asking simple questions in {{TARGET_LANG}} and \
 holding short {{TARGET_LANG}} dialogues — always built from THIS MODULE's structures.\n\
 \n\
+If they stall or go quiet, never leave them stuck: say the sentence for them, break it into two or three \
+pieces, and ask them to repeat it piece by piece before putting it back together.\n\
+\n\
 Correction rules: analyze pronunciation, grammar, vocabulary, and sentence structure. Explain each mistake in \
 one or two short {{BASE_LANG}} sentences, then repeat the correct {{TARGET_LANG}} form slowly, breaking it into parts if \
 needed, and ask {{LEARNER}} to repeat. Never humiliate; always encourage. Keep each spoken turn to 2-4 sentences. \
@@ -80,7 +83,9 @@ End most turns with one clear request or question so the conversation continues 
 Use your tools to keep the record of their progress accurate — this is not optional bookkeeping, it's how their \
 actual learning gets tracked:\n\
 - Call record_correction every time you correct something they said.\n\
-- Call create_flashcard when you teach an important new sentence or phrase worth reviewing later.\n\
+- Call create_flashcard for the structures this module drills — one per structure you work on — and also for \
+anything they got wrong repeatedly or struggled to pronounce. Their deck should be a record of this \
+conversation, not a generic word list; it is what they review to open the next module.\n\
 - Call master_sentence once they can produce a CURRENT PLANET sentence correctly from memory, unaided (not just \
 echoing you) — cite the sentence's id exactly as given below.\n\
 - Call bump_progress with a small delta (0.03 to 0.15) to reflect your honest read of their pronunciation, \
@@ -432,7 +437,9 @@ async fn build_instructions_for(
     ));
     if !finished.is_empty() {
         out.push_str(
-            "Their flashcards are done too — that is what opened the current module.\n",
+            "Their flashcards are done too — that is what opened the current module.\n\
+             OPEN THE SESSION with a short warm-up: one or two recall questions from those \
+             finished modules, then move into the current one. Do not re-teach them.\n",
         );
     }
     out.push('\n');
@@ -519,11 +526,22 @@ async fn build_instructions_for(
                 .flat_map(|m| services::curriculum::structures(&m.structures))
                 .collect();
             if !earlier.is_empty() {
-                out.push_str(
+                // The review module is the planet's final challenge — the spec
+                // wants it drawing on everything taught here, so it gets the
+                // whole list rather than the usual window.
+                let cap = if module.focus == "review" {
+                    earlier.len()
+                } else {
+                    20
+                };
+                out.push_str(if module.focus == "review" {
+                    "\nEVERYTHING THIS PLANET TAUGHT — this is the review module: build the \
+                     conversation out of these, mixing them freely, and close the planet with them:\n"
+                } else {
                     "\nEARLIER MODULES OF THIS PLANET — bring these back unannounced as recall \
-                     checks (\"how do you say ...?\"), never as new teaching:\n",
-                );
-                for s in earlier.iter().take(20) {
+                     checks (\"how do you say ...?\"), never as new teaching:\n"
+                });
+                for s in earlier.iter().take(cap) {
                     out.push_str(&format!("- {} — {}\n", s.target, s.base));
                 }
             }
