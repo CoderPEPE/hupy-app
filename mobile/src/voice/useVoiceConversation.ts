@@ -175,6 +175,9 @@ export function useVoiceConversation(
   // order the moment the session is up (see `openSession`'s `onopen`). An
   // array, not a single slot, so rapid consecutive sends can't lose one.
   const pendingTextsRef = useRef<string[]>([]);
+  /** The tutor opens the lesson, so it speaks first — but only once per
+   * session, since `session.updated` arrives again on every session.update. */
+  const openingTurnRef = useRef(false);
 
   // --- Echo gate state (see the constants above) --------------------------
   /** Running estimate of the mic level attributable to speaker echo. */
@@ -406,6 +409,13 @@ async function ensureMicPermission(): Promise<boolean> {
           break;
         }
         setConversationStatus('listening');
+        // The tutor starts the lesson: with semantic VAD the model otherwise
+        // waits for the learner to talk first, which leaves them staring at a
+        // silent screen wondering whose turn it is.
+        if (!openingTurnRef.current && pendingTextsRef.current.length === 0) {
+          openingTurnRef.current = true;
+          wsRef.current?.send(JSON.stringify({ type: 'response.create' }));
+        }
         recorder
           .startRecording({ ...RECORDING_CONFIG, onAudioStream: handleAudioStream })
           .catch((e) => {
@@ -601,6 +611,7 @@ async function ensureMicPermission(): Promise<boolean> {
     await stopInternal();
     setError(null);
     setMessages([]);
+    openingTurnRef.current = false;
     pendingToolCallsRef.current.clear();
     resetEchoGate();
     recordEnabledRef.current = withMic;

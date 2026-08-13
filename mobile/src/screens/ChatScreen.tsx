@@ -375,13 +375,33 @@ export function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice.messages, addMessage]);
 
-  /** Opens the live session. Only ever called from a deliberate user action
-   * (tapping the globe or the composer mic, or accepting the mic primer) —
-   * entering the screen never starts the mic on its own. */
+  /** Opens the live session. Called from a deliberate user action — tapping
+   * the globe or the composer mic, accepting the mic primer, or starting a
+   * lesson from the planet path, which is a deliberate "teach me this
+   * module" and so opens the session on arrival. */
   const startConversation = async () => {
     await ensureConversation();
     voice.start();
   };
+
+  /** Starting a lesson lands here with the module already chosen: the learner
+   * asked for the lesson, so the tutor opens it rather than leaving them on a
+   * silent screen waiting for a tap. Runs once per lesson entry — the ref
+   * keeps a re-render, or coming back to the tab, from restarting a session
+   * that is already live. */
+  const autoStartedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lessonPlanetId || voice.status !== 'idle') return;
+    if (autoStartedRef.current === lessonPlanetId) return;
+    autoStartedRef.current = lessonPlanetId;
+    // First ever session still explains why the microphone is needed.
+    if (!storage.getBoolean(StorageKeys.micPrimerSeen)) {
+      setShowMicPrimer(true);
+      return;
+    }
+    startConversation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lessonPlanetId]);
 
   /** "+" in the composer: close the session and start a fresh conversation.
    * `openSession` clears the voice transcript on the next start, so the local
