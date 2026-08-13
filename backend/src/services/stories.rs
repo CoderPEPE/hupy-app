@@ -23,7 +23,7 @@
 //! learner's name — never their private data, unless later authorized.
 
 use crate::errors::{AppError, Result};
-use crate::models::{Planet, TutorSentence};
+use crate::models::Planet;
 
 /// How many earlier-planet phrases the cumulative review section draws on.
 pub const REVIEW_SENTENCES: i64 = 12;
@@ -63,13 +63,14 @@ fn phase_for(planet: &Planet) -> usize {
     }
 }
 
-/// The spec's per-level duration bands, in minutes: beginner 8–12,
-/// intermediate 12–16, advanced 15–20, never above 20.
+/// The story's target length, in minutes. The spec asks for "aproximadamente
+/// 20 minutos" of listening per planet — long enough to fill a commute — so
+/// every planet aims at the same band, with the early ones allowed to land a
+/// little shorter because their structures are simpler and repeat sooner.
 pub fn target_minutes(planet: &Planet) -> (u32, u32) {
     match phase_for(planet) {
-        0 | 1 => (8, 12),
-        2 | 3 => (12, 16),
-        _ => (15, 20),
+        0 | 1 => (16, 20),
+        _ => (18, 20),
     }
 }
 
@@ -160,7 +161,7 @@ pub fn duration_secs(units: &[String]) -> i64 {
 /// spec's duration bands. [`generate_with_ai`] is the primary path.
 pub fn build_story(
     planet: &Planet,
-    sentences: &[TutorSentence],
+    chunks: &[(String, String)],
     review: &[(String, String)],
     name: &str,
 ) -> StoryText {
@@ -175,7 +176,7 @@ pub fn build_story(
     let mut units = vec![intro];
     let mut translation = vec![String::new()];
 
-    for (i, s) in sentences.iter().enumerate() {
+    for (i, (target, base)) in chunks.iter().enumerate() {
         let connector = if i == 0 {
             String::new()
         } else {
@@ -188,8 +189,8 @@ pub fn build_story(
                 format!("{c}, ")
             }
         };
-        units.push(format!("{connector}{}", s.en));
-        translation.push(s.pt.clone());
+        units.push(format!("{connector}{target}"));
+        translation.push(base.clone());
     }
 
     if !review.is_empty() {
@@ -221,7 +222,7 @@ pub fn build_story(
 /// development / ending, cumulative review, and the level's duration band.
 pub fn story_prompt(
     planet: &Planet,
-    sentences: &[TutorSentence],
+    modules: &[(String, Vec<(String, String)>)],
     review: &[(String, String)],
     name: &str,
     target_name: &str,
@@ -256,9 +257,16 @@ pub fn story_prompt(
         ));
     }
 
-    out.push_str("SENTENCES STUDIED ON THIS PLANET — the story must use these, or very close variations, as its backbone:\n");
-    for s in sentences {
-        out.push_str(&format!("- {} ({})\n", s.en, s.pt));
+    out.push_str(
+        "WHAT THEY STUDIED ON THIS PLANET, module by module — the story's backbone. \
+         The learner has said these out loud; hearing them again is the whole point, so use them \
+         (or very close variations) throughout:\n",
+    );
+    for (title, chunks) in modules {
+        out.push_str(&format!("\n{title}:\n"));
+        for (target, base) in chunks {
+            out.push_str(&format!("- {target} ({base})\n"));
+        }
     }
     if !review.is_empty() {
         out.push_str(
@@ -280,6 +288,9 @@ pub fn story_prompt(
 \n\
 RULES:\n\
 - A real story: a clear beginning, a development, and an ending. Not a list of sentences.\n\
+- The learner must recognise their own lessons in it. Most sentences should be a studied chunk or a \
+close variation of one — a different subject, tense or object. This is not a podcast of new material: \
+if they finish it thinking \"I understood that because I studied it\", it worked.\n\
 - Use ONLY grammar, vocabulary and verb tenses at or below level {level}. Never introduce a structure the learner has not been taught.\n\
 - Most of the content comes from this planet; the earlier phrases are review, not the focus.\n\
 - Short, spoken sentences — this is listened to while driving.\n\
@@ -462,19 +473,13 @@ mod tests {
             base_language: "pt".into(),
             level: "A1".into(),
             goal: String::new(),
+            focus_verbs: serde_json::json!([]),
         }
     }
 
-    fn sentence(en: &str, pt: &str) -> TutorSentence {
-        TutorSentence {
-            id: Uuid::new_v4(),
-            en: en.into(),
-            pt: pt.into(),
-            subject: String::new(),
-            verb: String::new(),
-            complement: String::new(),
-            mastered: false,
-        }
+    /// One studied chunk: (target, base).
+    fn chunk(target: &str, base: &str) -> (String, String) {
+        (target.into(), base.into())
     }
 
     #[test]
@@ -482,7 +487,7 @@ mod tests {
         let p = planet(1);
         let story = build_story(
             &p,
-            &[sentence("I am from Brazil.", "Sou do Brasil.")],
+            &[chunk("I am from Brazil.", "Sou do Brasil.")],
             &[],
             "Sergio",
         );
@@ -496,7 +501,7 @@ mod tests {
     #[test]
     fn story_omits_name_when_absent() {
         let p = planet(1);
-        let story = build_story(&p, &[sentence("I am from Brazil.", "Sou do Brasil.")], &[], "");
+        let story = build_story(&p, &[chunk("I am from Brazil.", "Sou do Brasil.")], &[], "");
         assert!(!story.sentences[0].contains("My name is"));
         assert!(story.sentences[0].contains("This is a little story"));
     }
@@ -507,8 +512,8 @@ mod tests {
         let story = build_story(
             &p,
             &[
-                sentence("I work every day.", "Trabalho todos os dias."),
-                sentence("I eat dinner at seven.", "Janto às sete."),
+                chunk("I work every day.", "Trabalho todos os dias."),
+                chunk("I eat dinner at seven.", "Janto às sete."),
             ],
             &[],
             "Ana",
@@ -525,7 +530,7 @@ mod tests {
         let p = planet(1);
         let story = build_story(
             &p,
-            &[sentence("I am from Brazil.", "Sou do Brasil.")],
+            &[chunk("I am from Brazil.", "Sou do Brasil.")],
             &[],
             "Sergio",
         );
@@ -537,7 +542,7 @@ mod tests {
         let p = planet(21); // B1 — connector format unchanged
         let story = build_story(
             &p,
-            &[sentence("I had a great time.", "Eu me diverti muito.")],
+            &[chunk("I had a great time.", "Eu me diverti muito.")],
             &[],
             "João",
         );
@@ -552,7 +557,7 @@ mod tests {
     fn earlier_phrases_are_reviewed_before_the_ending() {
         let p = planet(12);
         let review = vec![("I am from Brazil.".to_string(), "Sou do Brasil.".to_string())];
-        let story = build_story(&p, &[sentence("I clean the house.", "Limpo a casa.")], &review, "Ana");
+        let story = build_story(&p, &[chunk("I clean the house.", "Limpo a casa.")], &review, "Ana");
         assert_eq!(story.sentences.len(), story.translation.len());
         let review_at = story
             .sentences
@@ -565,16 +570,15 @@ mod tests {
         assert!(review_at < story.sentences.len() - 1);
     }
 
-    /// The spec's duration bands, by phase.
+    /// The spec asks for roughly twenty minutes of listening per planet, so
+    /// every planet aims there — the early ones from a little lower.
     #[test]
-    fn duration_targets_grow_with_the_level() {
-        assert_eq!(target_minutes(&planet(3)), (8, 12));
-        assert_eq!(target_minutes(&planet(15)), (8, 12));
-        assert_eq!(target_minutes(&planet(25)), (12, 16));
-        assert_eq!(target_minutes(&planet(45)), (15, 20));
-        assert_eq!(target_minutes(&planet(60)), (15, 20));
-        // Never past the spec's hard ceiling.
-        assert!(target_minutes(&planet(60)).1 <= 20);
+    fn every_planet_aims_at_about_twenty_minutes() {
+        for n in [1, 3, 15, 25, 45, 60] {
+            let (low, high) = target_minutes(&planet(n));
+            assert_eq!(high, 20, "planet {n} should aim at 20 minutes");
+            assert!(low >= 16, "planet {n} floor is {low}, too short");
+        }
     }
 
     #[test]
@@ -582,7 +586,10 @@ mod tests {
         let p = planet(1);
         let prompt = story_prompt(
             &p,
-            &[sentence("I am from Brazil.", "Sou do Brasil.")],
+            &[(
+                "Module 1 — Greetings".to_string(),
+                vec![chunk("I am from Brazil.", "Sou do Brasil.")],
+            )],
             &[("I work.".into(), "Eu trabalho.".into())],
             "Sergio",
             "English",
@@ -592,10 +599,12 @@ mod tests {
         assert!(prompt.contains("Sergio"));
         assert!(prompt.contains("I am from Brazil."));
         assert!(prompt.contains("I work."));
-        assert!(prompt.contains("8–12 minutes"));
+        assert!(prompt.contains("16–20 minutes"));
         // The concrete sentence count is what actually steers the length —
         // a word budget alone gets ignored.
-        assert!(prompt.contains("AT LEAST 136 units"), "{prompt}");
+        assert!(prompt.contains("AT LEAST 245 units"), "{prompt}");
+        // The story is built from the modules the learner worked through.
+        assert!(prompt.contains("Module 1 — Greetings"), "{prompt}");
     }
 
     #[test]

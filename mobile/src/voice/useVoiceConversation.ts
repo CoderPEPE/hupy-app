@@ -7,14 +7,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { ApiError } from '../api/client';
 import { getRealtimeClientSecret } from '../api/realtime';
-import type { RealtimeTool } from '../api/realtime';
+import type { RealtimeSessionMode, RealtimeTool } from '../api/realtime';
 import { translate, useI18nStore } from '../i18n';
 import { useAuthStore } from '../store/auth';
 import { float32ToPcm16Base64, resample, rms } from './audioCodec';
 import { audioLevels } from './audioLevels';
 import { realtimeAudioPlayer } from './audioEngine';
 
-export type ConversationStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error';
+export type ConversationStatus = 'idle' | 'connecting' | 'listening' | 'speaking' | 'error' | 'connected';
 
 export type ChatMessage = {
   id: string;
@@ -57,7 +57,7 @@ const RESPONSE_START_GRACE_MS = 150;
  * coming out of the speaker. Android needs longer because it mutes the whole
  * turn anyway; iOS only needs to cover the playback tail.
  */
-const POST_SPEECH_MUTE_IOS_MS = 150;
+const POST_SPEECH_MUTE_IOS_MS = 400;
 
 // ---------------------------------------------------------------------------
 // Echo gate
@@ -76,14 +76,6 @@ const POST_SPEECH_MUTE_IOS_MS = 150;
 // chopped up mid-sentence.
 // ---------------------------------------------------------------------------
 
-/** Smoothing for the running estimate of the echo level (0..1, higher = faster). */
-const ECHO_FLOOR_ALPHA = 0.15;
-/** How much louder than the observed echo floor speech must be to count. */
-const ECHO_GATE_MARGIN = 2.5;
-/** Absolute floor, so near-silence can never open the gate. */
-const ECHO_GATE_MIN_RMS = 0.02;
-/** Consecutive qualifying frames (~100 ms each) required to open the gate. */
-const ECHO_GATE_FRAMES = 2;
 
 // Only used if the backend is too old to return the canonical instructions.
 // Intentionally names no one: the backend personalizes the real prompt with
@@ -130,7 +122,7 @@ function t(key: Parameters<typeof translate>[1], params?: Parameters<typeof tran
 
 export function useVoiceConversation(
   onToolCall: ToolCallHandler,
-  opts?: { instructionsSuffix?: string },
+  opts?: { instructionsSuffix?: string; mode?: RealtimeSessionMode; planetId?: string },
 ) {
   const recorder = useAudioRecorder();
   const [status, setStatus] = useState<ConversationStatus>('idle');
@@ -144,7 +136,22 @@ export function useVoiceConversation(
   useEffect(() => {
     suffixRef.current = opts?.instructionsSuffix ?? '';
   }, [opts?.instructionsSuffix]);
+  // Always-current session scope (generic free conversation vs. a planet
+  // lesson), read by the frozen `openSession` callback when it mints the
+  // client secret.
+  const modeRef = useRef<RealtimeSessionMode | undefined>(opts?.mode);
+  useEffect(() => {
+    modeRef.current = opts?.mode;
+  }, [opts?.mode]);
+  const planetIdRef = useRef(opts?.planetId);
+  useEffect(() => {
+    planetIdRef.current = opts?.planetId;
+  }, [opts?.planetId]);
   const statusRef = useRef<ConversationStatus>('idle');
+  // Whether the microphone should come up with the session. False for
+  // text-only sessions (opened by a typed message): the tutor still answers
+  // out loud, but the mic never turns on and no permission is requested.
+  const recordEnabledRef = useRef(true);
   // Earliest time (ms epoch) at which mic audio may be sent to the API again.
   const micUnmuteAtRef = useRef(0);
   // Always-current tool-call handler, so the frozen WS callbacks never call a
@@ -156,22 +163,18 @@ export function useVoiceConversation(
   // call_id -> tool name, filled in when a function_call item starts and
   // consumed once its arguments finish streaming.
   const pendingToolCallsRef = useRef<Map<string, string>>(new Map());
+  // Typed messages queued while the socket wasn't open yet — flushed in
+  // order the moment the session is up (see `openSession`'s `onopen`). An
+  // array, not a single slot, so rapid consecutive sends can't lose one.
+  const pendingTextsRef = useRef<string[]>([]);
+  /** The tutor opens the lesson, so it speaks first — but only once per
+   * session, since `session.updated` arrives again on every session.update. */
+  const openingTurnRef = useRef(false);
 
   // --- Echo gate state (see the constants above) --------------------------
-  /** Running estimate of the mic level attributable to speaker echo. */
-  const echoFloorRef = useRef(0);
-  /** True once the user has clearly spoken over the tutor this turn. */
-  const echoGateOpenRef = useRef(false);
-  /** Consecutive frames currently above the gate threshold. */
-  const gateStreakRef = useRef(0);
 
   /** Called at the start of each tutor turn: nothing has been attributed to
    * the user yet, and the echo level is unknown again. */
-  const resetEchoGate = () => {
-    echoGateOpenRef.current = false;
-    gateStreakRef.current = 0;
-    echoFloorRef.current = 0;
-  };
 
   const setConversationStatus = (next: ConversationStatus) => {
     statusRef.current = next;
@@ -239,10 +242,17 @@ async function ensureMicPermission(): Promise<boolean> {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
+    // Half-duplex: while the tutor is speaking — or its audio is still coming
+    // out of the speaker — the microphone is not forwarded at all, on any
+    // platform. iOS used to stay open mid-turn and lean on hardware echo
+    // cancellation plus a loudness heuristic, which the Simulator does not
+    // have and a loud speaker defeats: the tutor heard itself, "interrupted"
+    // itself, answered the interruption, and looped. To interrupt, tap the
+    // mic button, which stops playback first.
     const dropped =
-      Platform.OS === 'ios'
-        ? Date.now() < micUnmuteAtRef.current
-        : statusRef.current === 'speaking' || Date.now() < micUnmuteAtRef.current;
+      statusRef.current === 'speaking' ||
+      realtimeAudioPlayer.getRemainingPlaybackMs() > 0 ||
+      Date.now() < micUnmuteAtRef.current;
     const stats = micStatsRef.current;
     if (dropped) {
       stats.dropped += 1;
@@ -278,31 +288,6 @@ async function ensureMicPermission(): Promise<boolean> {
       audioLevels.publish(micRms, 'mic');
     }
 
-    // While the tutor is talking, only forward audio that is clearly louder
-    // than the echo we are hearing from our own speaker — otherwise the
-    // server's VAD treats the tutor's voice as an interruption and the
-    // conversation loops (see the echo-gate notes above).
-    if (statusRef.current === 'speaking' && !echoGateOpenRef.current) {
-      const level = micRms;
-      const threshold = Math.max(ECHO_GATE_MIN_RMS, echoFloorRef.current * ECHO_GATE_MARGIN);
-      if (level > threshold) {
-        gateStreakRef.current += 1;
-        if (gateStreakRef.current >= ECHO_GATE_FRAMES) {
-          echoGateOpenRef.current = true;
-          debugLog('[voice] echo gate opened — treating as real barge-in');
-        }
-      } else {
-        gateStreakRef.current = 0;
-        // Only adapt the floor while we believe we're hearing echo, so the
-        // user's own voice can't inflate the threshold against them.
-        echoFloorRef.current += (level - echoFloorRef.current) * ECHO_FLOOR_ALPHA;
-      }
-      if (!echoGateOpenRef.current) {
-        stats.dropped += 1;
-        return;
-      }
-    }
-
     const resampled = resample(samples, RECORD_RATE, TARGET_RATE);
     ws.send(
       JSON.stringify({
@@ -310,6 +295,22 @@ async function ensureMicPermission(): Promise<boolean> {
         audio: float32ToPcm16Base64(resampled),
       }),
     );
+  };
+
+  /** Sends a user text message into the live conversation; the tutor answers
+   * out loud exactly as if the user had spoken it. */
+  const sendUserText = (ws: WebSocket, text: string) => {
+    ws.send(
+      JSON.stringify({
+        type: 'conversation.item.create',
+        item: {
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text }],
+        },
+      }),
+    );
+    ws.send(JSON.stringify({ type: 'response.create' }));
   };
 
   /**
@@ -364,7 +365,20 @@ async function ensureMicPermission(): Promise<boolean> {
     }
     switch (msg.type) {
       case 'session.updated':
+        if (!recordEnabledRef.current) {
+          // Text-only session (opened by a typed message) — the tutor can
+          // still answer out loud, but the mic stays off.
+          setConversationStatus('connected');
+          break;
+        }
         setConversationStatus('listening');
+        // The tutor starts the lesson: with semantic VAD the model otherwise
+        // waits for the learner to talk first, which leaves them staring at a
+        // silent screen wondering whose turn it is.
+        if (!openingTurnRef.current && pendingTextsRef.current.length === 0) {
+          openingTurnRef.current = true;
+          wsRef.current?.send(JSON.stringify({ type: 'response.create' }));
+        }
         recorder
           .startRecording({ ...RECORDING_CONFIG, onAudioStream: handleAudioStream })
           .catch((e) => {
@@ -380,16 +394,16 @@ async function ensureMicPermission(): Promise<boolean> {
         // automatic on iOS once real mic audio reaches the server mid-turn,
         // or from a manual tap-to-interrupt on either platform).
         //
-        // If the tutor is mid-turn and the echo gate never opened, we know we
-        // forwarded no user speech, so whatever the server detected can only
-        // be our own playback leaking into the mic. Honouring it there is
-        // exactly what caused the interrupt/answer/interrupt loop.
-        if (statusRef.current === 'speaking' && !echoGateOpenRef.current) {
+        // No mic audio is forwarded while the tutor is audible, so anything
+        // the server detects then can only be our own playback leaking into
+        // the microphone. Honouring it is exactly what caused the
+        // interrupt/answer/interrupt loop.
+        if (statusRef.current === 'speaking') {
           debugLog('[voice] ignoring speech_started — attributed to speaker echo');
           break;
         }
         realtimeAudioPlayer.clear();
-        setConversationStatus('listening');
+        setConversationStatus(recordEnabledRef.current ? 'listening' : 'connected');
         break;
 
       case 'conversation.item.input_audio_transcription.delta':
@@ -421,8 +435,7 @@ async function ensureMicPermission(): Promise<boolean> {
           debugLog('[voice] tutor speaking starts');
           // New turn: re-learn the echo level and require the user to prove
           // they're really talking before we forward audio again.
-          resetEchoGate();
-          setConversationStatus('speaking');
+                setConversationStatus('speaking');
           if (Platform.OS === 'ios') {
             micUnmuteAtRef.current = Date.now() + RESPONSE_START_GRACE_MS;
           }
@@ -447,8 +460,7 @@ async function ensureMicPermission(): Promise<boolean> {
           realtimeAudioPlayer.getRemainingPlaybackMs(),
           ')',
         );
-        resetEchoGate();
-        setConversationStatus('listening');
+            setConversationStatus(recordEnabledRef.current ? 'listening' : 'connected');
         break;
       }
 
@@ -523,9 +535,8 @@ async function ensureMicPermission(): Promise<boolean> {
     if (statusRef.current !== 'speaking') return;
     await realtimeAudioPlayer.clear();
     micUnmuteAtRef.current = 0;
-    resetEchoGate();
     ws.send(JSON.stringify({ type: 'response.cancel' }));
-    setConversationStatus('listening');
+    setConversationStatus(recordEnabledRef.current ? 'listening' : 'connected');
   }, []);
 
   const stopInternal = useCallback(async () => {
@@ -552,28 +563,36 @@ async function ensureMicPermission(): Promise<boolean> {
     }
   }, [recorder.stopRecording]);
 
-  const start = useCallback(async () => {
+  /** Opens the Realtime session. With `withMic` the microphone permission is
+   * requested (Android) and the recorder starts as soon as the session is up;
+   * without it (a typed message) the tutor still answers out loud, but the
+   * mic never turns on and no permission is requested. */
+  const openSession = useCallback(async (withMic: boolean) => {
     await stopInternal();
     setError(null);
     setMessages([]);
+    openingTurnRef.current = false;
     pendingToolCallsRef.current.clear();
-    resetEchoGate();
+    recordEnabledRef.current = withMic;
 
-    // Ask for the microphone first — on Android this triggers the system popup.
-    // (Must happen before any @siteed/audio-studio call: its internal request
-    // runs from a background context on Android and is silently denied.)
-    const micGranted = await ensureMicPermission();
-    if (!micGranted) {
-      setError(t('voice.micPermissionRequired'));
-      setConversationStatus('error');
-      return;
+    if (withMic) {
+      // Ask for the microphone first — on Android this triggers the system
+      // popup. (Must happen before any @siteed/audio-studio call: its internal
+      // request runs from a background context on Android and is silently
+      // denied.)
+      const micGranted = await ensureMicPermission();
+      if (!micGranted) {
+        setError(t('voice.micPermissionRequired'));
+        setConversationStatus('error');
+        return;
+      }
+
+      // Pre-initialize the audio pipeline now that the permission is granted,
+      // so recording starts with zero latency once the session is ready.
+      recorder.prepareRecording(RECORDING_CONFIG).catch(() => {
+        // startRecording will surface real errors when the session starts.
+      });
     }
-
-    // Pre-initialize the audio pipeline now that the permission is granted,
-    // so recording starts with zero latency once the session is ready.
-    recorder.prepareRecording(RECORDING_CONFIG).catch(() => {
-      // startRecording will surface real errors when the session starts.
-    });
 
     setConversationStatus('connecting');
 
@@ -584,7 +603,17 @@ async function ensureMicPermission(): Promise<boolean> {
     // tutor voice, or their course's default.
     let startSessionVoice: string;
     try {
-      const res = await getRealtimeClientSecret();
+      // Generic chat asks the backend for the free-conversation session;
+      // lesson chat names its planet so the tutor scopes to that content;
+      // anything else (e.g. flashcard practice) leaves the body empty and
+      // gets the planet-scoped session exactly as before.
+      const res = await getRealtimeClientSecret(
+        modeRef.current === 'generic'
+          ? { mode: 'generic' }
+          : modeRef.current === 'lesson' && planetIdRef.current
+            ? { mode: 'lesson', planetId: planetIdRef.current }
+            : undefined,
+      );
       secret = res.value;
       instructions = res.instructions ?? FALLBACK_TUTOR_PROMPT;
       tools = res.tools ?? [];
@@ -636,6 +665,13 @@ async function ensureMicPermission(): Promise<boolean> {
           },
         }),
       );
+      // Messages typed while the session was still starting — send them now,
+      // in order.
+      if (pendingTextsRef.current.length > 0) {
+        const pending = pendingTextsRef.current;
+        pendingTextsRef.current = [];
+        for (const text of pending) sendUserText(ws, text);
+      }
     };
 
     ws.onmessage = (event) => {
@@ -664,6 +700,58 @@ async function ensureMicPermission(): Promise<boolean> {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /** Full voice session (the one the globe and composer mic start): asks for
+   * the mic and records as usual. */
+  const start = useCallback(() => openSession(true), [openSession]);
+
+  /**
+   * Sends a typed message to the tutor. The Realtime session stays voice-first
+   * (the tutor always answers out loud), but accepts text input natively, so
+   * the user can type instead of speak when they prefer.
+   *
+   * - If a session is already open, the message goes straight in (interrupting
+   *   the tutor mid-sentence if she is speaking).
+   * - If it isn't, a text-only session is opened — the mic never turns on and
+   *   no permission is requested; the message is queued and flushed the
+   *   instant the socket opens.
+   */
+  const sendText = useCallback(
+    async (text: string): Promise<boolean> => {
+      const trimmed = text.trim();
+      if (!trimmed) return false;
+      const id = `text-${Date.now()}-${Math.floor(Math.random() * 1e4)}`;
+
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        // Let the tutor finish speaking, then answer the typed message
+        // (same as tapping to interrupt, then talking).
+        if (statusRef.current === 'speaking') await interrupt();
+        appendMessage(id, 'user', trimmed, false);
+        sendUserText(ws, trimmed);
+        return true;
+      }
+
+      pendingTextsRef.current.push(trimmed);
+      if (statusRef.current === 'idle' || statusRef.current === 'error') {
+        await openSession(false);
+        // The session failed to come up (backend unreachable) — don't leave
+        // a phantom bubble: tell the caller so it can put the draft back for
+        // the user to retry.
+        if (statusRef.current === 'error') {
+          pendingTextsRef.current = [];
+          return false;
+        }
+      }
+      // The session's openSession() wipes the transcript, so the local bubble
+      // is appended after it returns — the socket itself may still be opening;
+      // `onopen` flushes the queued text.
+      appendMessage(id, 'user', trimmed, false);
+      return true;
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [],
+  );
+
   // Tear down on unmount.
   useEffect(() => {
     return () => {
@@ -673,5 +761,17 @@ async function ensureMicPermission(): Promise<boolean> {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { status, messages, error, start, stop: stopInternal, interrupt };
+  return {
+    status,
+    messages,
+    error,
+    start,
+    stop: stopInternal,
+    interrupt,
+    sendText,
+    // Whether the current session has the mic on (false while a text-only
+    // session — started by a typed message — is open). Read at event time or
+    // right after a status change, never stale by the time it's used.
+    micEnabled: recordEnabledRef.current,
+  };
 }

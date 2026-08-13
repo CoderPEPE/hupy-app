@@ -26,6 +26,7 @@ import {
   useAddCorrection,
   useCreateConversation,
   useCreateFlashcard,
+  usePlanet,
   useFlashcards,
   usePlanets,
   useReviewFlashcard,
@@ -37,7 +38,7 @@ import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing, typography } from '../theme';
 import { useVoiceConversation, type ToolCallHandler } from '../voice/useVoiceConversation';
 import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
-import type { CardRating, Flashcard } from '../types';
+import { currentPlanet, type CardRating, type Flashcard } from '../types';
 
 /** "Não lembrei" has no separate backend tier (the SRS schedule only knows
  * hard/medium/easy) — it submits the same 'hard' rating as "Difícil" so the
@@ -375,17 +376,33 @@ export function FlashcardsScreen() {
 
   const { data: cards = [], isLoading } = useFlashcards();
   const { data: planets = [] } = usePlanets();
+  // The module waiting on its cards, if any: its deck is the one thing
+  // standing between the learner and the next module, so it comes first.
+  const active = currentPlanet(planets);
+  const { data: activeDetail } = usePlanet(active?.id);
+  const pendingModule = activeDetail?.lessons?.find((l) => l.state === 'flashcards_pending');
+  const moduleCards = pendingModule
+    ? cards.filter((c) => c.lesson_id === pendingModule.id)
+    : [];
 
   const deck = activeDeckId ?? 'all';
   // "Review" = due cards (server SRS ordering: next_review_at asc).
   // "Learned" = cards not currently due, i.e. already reviewed ahead.
-  const deckCards = cards.filter(
-    (c) => (deck === 'all' || c.planet_id === deck) && (showLearned ? !c.due : c.due),
-  );
-  const dueCount = cards.filter((c) => (deck === 'all' || c.planet_id === deck) && c.due).length;
+  // A deck is "all", a planet, or the pending module's own set.
+  const inDeck = (c: (typeof cards)[number]) =>
+    deck === 'all' || c.planet_id === deck || c.lesson_id === deck;
+  const deckCards = cards.filter((c) => inDeck(c) && (showLearned ? !c.due : c.due));
+  const dueCount = cards.filter((c) => inDeck(c) && c.due).length;
   const dueTotal = cards.filter((c) => c.due).length;
-  const planetName = (id: string | null) =>
-    id ? planets.find((p) => p.id === id)?.title ?? t('flashcards.planetFallback') : t('flashcards.allCards');
+  const planetName = (id: string | null) => {
+    if (!id) return t('flashcards.allCards');
+    const asPlanet = planets.find((p) => p.id === id);
+    if (asPlanet) return asPlanet.title;
+    // A module's review deck (opened via "Start review") is titled by the
+    // module itself, not the generic planet fallback.
+    const asModule = activeDetail?.lessons?.find((l) => l.id === id);
+    return asModule?.title ?? t('flashcards.planetFallback');
+  };
 
   useEffect(() => {
     Animated.timing(flip, {
@@ -431,6 +448,24 @@ export function FlashcardsScreen() {
         />
 
         <ScrollView contentContainerStyle={styles.deckList} showsVerticalScrollIndicator={false}>
+          {pendingModule && moduleCards.length > 0 && (
+            <Card row style={styles.gateCard} onPress={() => openDeck(pendingModule.id)}>
+              <View style={styles.gateIcon}>
+                <Layers size={20} color={colors.brand.orange} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.gateTitle}>{pendingModule.title}</Text>
+                <Text style={styles.gateBody}>
+                  {t('flashcards.moduleGate', {
+                    done: pendingModule.flashcards_reviewed,
+                    total: pendingModule.flashcards_total,
+                  })}
+                </Text>
+              </View>
+              <ChevronRight size={18} color={colors.brand.orange} />
+            </Card>
+          )}
+
           <Card row style={styles.heroCard} onPress={() => openDeck('all')}>
             <View style={styles.heroIcon}>
               <Layers size={22} color={colors.textOnPrimary} />
@@ -762,6 +797,29 @@ const styles = StyleSheet.create({
     // Clears the floating tab bar — the last deck was landing underneath it.
     paddingBottom: 120,
     paddingTop: spacing.sm,
+  },
+  gateCard: {
+    marginBottom: spacing.sm,
+    padding: spacing.md,
+    borderWidth: 1.5,
+    borderColor: colors.brand.orange,
+  },
+  gateIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFEEDD',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gateTitle: {
+    ...typography.cardTitle,
+    color: colors.text,
+  },
+  gateBody: {
+    ...typography.caption,
+    color: colors.brand.orange,
+    marginTop: 2,
   },
   heroCard: {
     marginBottom: spacing.md,

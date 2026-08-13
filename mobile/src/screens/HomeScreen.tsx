@@ -22,7 +22,7 @@ import { displayName } from '../utils/userName';
 export function HomeScreen() {
   const t = useT();
   const user = useAuthStore((s) => s.user);
-  const { openPlanet, beginLesson, setTab } = useUiStore();
+  const { openPlanet, beginLesson, reviewModule, setTab } = useUiStore();
   const { data: planets = [], isLoading } = usePlanets();
   const { data: cards = [] } = useFlashcards();
   const { data: stories = [] } = useStories();
@@ -34,17 +34,19 @@ export function HomeScreen() {
   const activePlanet = currentPlanet(planets);
   const { data: detail } = usePlanet(activePlanet?.id);
   const blocks = detail?.lessons ?? [];
-  // A block flagged for review outranks the next new one — the spec's short
-  // personalized review comes before more content.
-  const reviewBlock = blocks.find((l) => l.state === 'review') ?? null;
-  const nextLesson = reviewBlock ?? nextBlock(blocks);
+  // The module they are on: either its conversation is still to be held, or
+  // only its flashcards are left.
+  const nextLesson = nextBlock(blocks);
 
   const mastery = activePlanet ? Math.round((activePlanet.progress?.mastery ?? 0) * 100) : 0;
 
   const continueLearning = () => {
     if (!activePlanet) return;
     if (nextLesson) {
-      beginLesson(activePlanet.id, nextLesson.id);
+      // A module that is only waiting on its cards is reviewed on the
+      // Flashcards tab — the next module does not open until they are done.
+      if (nextLesson.state === 'flashcards_pending') reviewModule(nextLesson.id);
+      else beginLesson(activePlanet.id, nextLesson.id);
     } else {
       openPlanet(activePlanet.id);
     }
@@ -142,7 +144,9 @@ export function HomeScreen() {
               />
               <Pressable style={styles.heroCta} onPress={continueLearning} accessibilityRole="button">
                 <Text style={styles.heroCtaText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
-                  {reviewBlock ? t('planets.startReview') : t('home.continueLearning')}
+                  {nextLesson?.state === 'flashcards_pending'
+                    ? t('planets.reviewCards')
+                    : t('home.continueLearning')}
                 </Text>
                 <ArrowRight size={16} color={colors.textOnPrimary} />
               </Pressable>

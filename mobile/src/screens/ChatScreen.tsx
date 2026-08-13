@@ -1,30 +1,35 @@
 import {
+  ArrowUp,
+  AudioLines,
   CheckCircle2,
   ChevronLeft,
+  Globe,
   ListChecks,
   Loader2,
   LogOut,
   Mic,
+  Plus,
   Sparkles,
   Volume2,
-  Square,
 } from 'lucide-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Animated,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppTabBar } from '../components/AppTabBar';
 import { Confetti } from '../components/Confetti';
 import { LanguageSwitch } from '../components/LanguageSwitch';
-import { Mascot } from '../components/Mascot';
 import { PermissionModal } from '../components/PermissionModal';
 import { StreakXpBar } from '../components/StreakXpBar';
+import { VoiceGlobe } from '../components/VoiceGlobe';
 import { Card, IconButton, ScreenHeader } from '../components/ui';
 import { storage, StorageKeys } from '../storage';
 import {
@@ -36,27 +41,104 @@ import {
   useConversations,
   useCorrectionToCard,
   useCreateConversation,
+  useCompleteModule,
   useCreateFlashcard,
   useGamificationStats,
   useMasterSentence,
+  usePlanet,
   usePlanets,
+  useRecordProduction,
 } from '../api/hooks';
 import type { ProgressMetric } from '../api/planets';
-import { localeTag, plural, useI18nStore, useT } from '../i18n';
+import type { RealtimeSessionMode } from '../api/realtime';
+import type { PlanetLesson } from '../types';
+import { localeTag, plural, useI18nStore, useT, type TranslationKey } from '../i18n';
 import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing, typography } from '../theme';
 import { displayName } from '../utils/userName';
-import { audioLevels } from '../voice/audioLevels';
 import { useVoiceConversation, type ToolCallHandler } from '../voice/useVoiceConversation';
 import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
 import {
-  currentPlanet,
   type ChatMessage,
   type ConversationSummary,
   type LessonCorrection,
   type LessonStepKind,
 } from '../types';
+
+// ---------------------------------------------------------------------------
+// Module drill progress (lesson chats only)
+// ---------------------------------------------------------------------------
+
+/** How many correct productions finish one structure — mirrors
+ * `REQUIRED_PRODUCTIONS` on the backend. */
+const PRODUCTIONS_REQUIRED = 3;
+
+/** The compact drill bar pinned under the header of a lesson chat: one
+ * segment per structure, three ticks each (one per correct production), the
+ * current structure highlighted. Drawn from the same server rows the next
+ * session's prompt resumes from, so the bar is the checkpoint made visible. */
+function ModuleProgressBar({ module }: { module: PlanetLesson }) {
+  const t = useT();
+  const structures = module.structures ?? [];
+  if (structures.length === 0) return null;
+
+  const total = structures.length * PRODUCTIONS_REQUIRED;
+  const done = structures.reduce(
+    (sum, s) => sum + Math.min(s.productions ?? 0, PRODUCTIONS_REQUIRED),
+    0,
+  );
+  // The module's conversation is behind the learner once its state moves off
+  // 'current' (flashcards pending, or fully completed).
+  const closed = module.state !== 'current';
+  const current = structures.find((s) => !s.done);
+
+  return (
+    <View style={styles.moduleProgress}>
+      <View style={styles.moduleProgressTop}>
+        <Text style={styles.moduleProgressTitle}>
+          {closed
+            ? t('chat.moduleProgressComplete', { position: module.position })
+            : t('chat.moduleProgress', { position: module.position })}
+        </Text>
+        <Text style={styles.moduleProgressCount}>
+          {t('chat.moduleProgressCount', { done, total })}
+        </Text>
+      </View>
+      <View style={styles.moduleProgressSegments}>
+        {structures.map((s) => (
+          <View key={s.target} style={styles.moduleProgressSegment}>
+            {Array.from({ length: PRODUCTIONS_REQUIRED }, (_, tick) => {
+              const filled = (s.productions ?? 0) > tick;
+              const isCurrent =
+                !closed && !filled && current?.target === s.target;
+              return (
+                <View
+                  key={tick}
+                  style={[
+                    styles.moduleProgressTick,
+                    filled && styles.moduleProgressTickFilled,
+                    isCurrent && styles.moduleProgressTickCurrent,
+                  ]}
+                />
+              );
+            })}
+          </View>
+        ))}
+      </View>
+      {current && !closed && (
+        <Text style={styles.moduleProgressNow} numberOfLines={1}>
+          {t('chat.moduleProgressNow', { sentence: current.target })}
+        </Text>
+      )}
+      {closed && (
+        <Text style={styles.moduleProgressNow} numberOfLines={1}>
+          {t('chat.moduleProgressReview')}
+        </Text>
+      )}
+    </View>
+  );
+}
 
 function CorrectionCard({
   correction,
@@ -143,127 +225,6 @@ function CorrectionCard({
   );
 }
 
-const STEP_LABELS: { keys: [1 | 2 | 3 | 4, 'chat.step.listen' | 'chat.step.shadow' | 'chat.step.speak' | 'chat.step.correct'] }[] = [
-  { keys: [1, 'chat.step.listen'] },
-  { keys: [2, 'chat.step.shadow'] },
-  { keys: [3, 'chat.step.speak'] },
-  { keys: [4, 'chat.step.correct'] },
-];
-
-/** 1-4 step progress rail (Escutar/Shadowing/Falar/Corrigir). Steps 1-3 track
- * the real voice status (tutor speaking vs. mic listening, with a short timer
- * splitting "just finished listening" from "now talking freely" — the
- * realtime API doesn't expose that distinction directly). Step 4 lights up
- * whenever the latest message actually is a correction. */
-function StepIndicator({ current }: { current: 1 | 2 | 3 | 4 }) {
-  const t = useT();
-  return (
-    <View style={styles.stepRow}>
-      {STEP_LABELS.map(({ keys: [n, labelKey] }, i) => {
-        const active = n === current;
-        const done = n < current;
-        return (
-          <React.Fragment key={n}>
-            {i > 0 && <View style={[styles.stepLine, (done || active) && styles.stepLineActive]} />}
-            <View style={styles.stepItem}>
-              <View style={[styles.stepDot, active && styles.stepDotActive, done && styles.stepDotDone]}>
-                <Text style={[styles.stepDotText, (active || done) && styles.stepDotTextActive]}>{n}</Text>
-              </View>
-              <Text style={[styles.stepLabel, active && styles.stepLabelActive]}>{t(labelKey)}</Text>
-            </View>
-          </React.Fragment>
-        );
-      })}
-    </View>
-  );
-}
-
-const WAVEFORM_BARS = 24;
-/** Levels stop arriving when nobody is talking; after this the wave decays. */
-const WAVEFORM_IDLE_MS = 200;
-
-/**
- * Live waveform driven by the real audio level of the conversation — the
- * microphone while the user talks, and the tutor's playback while it speaks
- * (see `audioLevels`). New samples push in from the right, so the bars scroll
- * like a real meter.
- *
- * Levels arrive ~10-25x/second, so each bar is an `Animated.Value` written
- * directly: this never re-renders the Chat screen.
- */
-function Waveform() {
-  const bars = useRef(Array.from({ length: WAVEFORM_BARS }, () => new Animated.Value(0))).current;
-  const history = useRef<number[]>(new Array(WAVEFORM_BARS).fill(0)).current;
-  const [live, setLive] = useState(false);
-
-  useEffect(() => {
-    let idleTimer: ReturnType<typeof setTimeout> | null = null;
-    let decayTimer: ReturnType<typeof setInterval> | null = null;
-
-    const push = (level: number) => {
-      history.shift();
-      history.push(level);
-      for (let i = 0; i < bars.length; i++) bars[i].setValue(history[i]);
-    };
-
-    const stopDecay = () => {
-      if (decayTimer) {
-        clearInterval(decayTimer);
-        decayTimer = null;
-      }
-    };
-
-    /** Once audio stops, keep scrolling silence in so the tail drains off the
-     * left edge instead of the whole wave snapping flat. */
-    const startDecay = () => {
-      stopDecay();
-      decayTimer = setInterval(() => {
-        push(0);
-        if (history.every((v) => v === 0)) stopDecay();
-      }, 40);
-    };
-
-    const unsubscribe = audioLevels.subscribe((level) => {
-      stopDecay();
-      setLive(true);
-      push(level);
-      if (idleTimer) clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => {
-        setLive(false);
-        startDecay();
-      }, WAVEFORM_IDLE_MS);
-    });
-
-    return () => {
-      unsubscribe();
-      if (idleTimer) clearTimeout(idleTimer);
-      stopDecay();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  return (
-    <View style={styles.waveform}>
-      {bars.map((b, i) => (
-        <Animated.View
-          key={i}
-          style={[
-            styles.waveformBar,
-            {
-              backgroundColor: live ? colors.primary : colors.border,
-              height: b.interpolate({
-                inputRange: [0, 1],
-                outputRange: [3, 36],
-                extrapolate: 'clamp',
-              }),
-            },
-          ]}
-        />
-      ))}
-    </View>
-  );
-}
-
 function asString(v: unknown): string {
   return typeof v === 'string' ? v : '';
 }
@@ -280,29 +241,41 @@ export function ChatScreen() {
   const { unlockNotice, clearUnlockNotice, setUnlockNotice, lessonPlanetId } = useUiStore();
 
   const { data: planets = [] } = usePlanets();
-  // The Planets tab can pick a planet via "Continue lesson"; otherwise the
-  // first active (or first overall) planet is what the tutor teaches —
-  // matches the backend's own `active_planet_for` so the transcript header
-  // never disagrees with what the live session is actually scoped to.
-  const planet =
-    (lessonPlanetId ? planets.find((p) => p.id === lessonPlanetId) : undefined) ??
-    currentPlanet(planets) ??
-    null;
+  // Two modes, one screen ("clone this view"): the Chat tab with no lesson
+  // context is a GENERIC free conversation — no planet pill, no curriculum
+  // scope, like opening a new ChatGPT chat. A planet-scoped LESSON chat only
+  // happens when a lesson was explicitly started ("Continue lesson" / chapter
+  // intro), which sets `lessonPlanetId` in the ui store.
+  const chatMode: RealtimeSessionMode = lessonPlanetId ? 'lesson' : 'generic';
+  const planet = lessonPlanetId ? planets.find((p) => p.id === lessonPlanetId) ?? null : null;
 
   const createConversation = useCreateConversation();
   const addMessage = useAddMessage();
   const addCorrection = useAddCorrection();
   const createFlashcard = useCreateFlashcard();
+  const completeModule = useCompleteModule();
+  // The module the tutor is teaching this session — the one the whole prompt
+  // is scoped to. Cards it mints and its completion both hang off this id.
+  const { data: planetDetail } = usePlanet(lessonPlanetId ?? undefined);
+  const currentModule = planetDetail?.lessons?.find(
+    (l) => l.state === 'current' || l.state === 'flashcards_pending',
+  );
   const masterSentence = useMasterSentence();
   const bumpProgress = useBumpProgress();
   const confirmFlashcardMastery = useConfirmFlashcardMastery();
+  const logProduction = useRecordProduction();
   const { data: gamification } = useGamificationStats();
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [draft, setDraft] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [confettiKey, setConfettiKey] = useState(0);
   const [showMicPrimer, setShowMicPrimer] = useState(false);
+  // The module this session's tutor is teaching — captured when the session
+  // starts so the progress bar stays on it even after the module's
+  // conversation closes and the planet detail moves on to the next one.
+  const [sessionLessonId, setSessionLessonId] = useState<string | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   // One backend conversation per session — created once, on mount.
@@ -314,16 +287,22 @@ export function ChatScreen() {
   planetRef.current = planet;
 
   const firstName = displayName(user) || t('chat.guestName');
+  /** The language being learned — what this whole session is *in*. */
+  const targetLanguage = user?.language ?? 'en';
 
-  /** Creates (once) and returns the backend conversation for this session. */
+  /** Creates (once) and returns the backend conversation for this session.
+   * Lesson chats are attached to their planet; the generic free conversation
+   * is created without one. */
   const ensureConversation = async (): Promise<string | null> => {
     if (conversationIdRef.current) return conversationIdRef.current;
     const p = planetRef.current;
-    if (!p) return null;
     try {
       const conv = await createConversation.mutateAsync({
-        title: t('chat.history.liveConversationTitle'),
-        planetId: p.id,
+        title:
+          chatMode === 'generic'
+            ? t('chat.history.freeChatTitle')
+            : t('chat.history.liveConversationTitle'),
+        planetId: p?.id,
       });
       conversationIdRef.current = conv.id;
       return conv.id;
@@ -387,8 +366,38 @@ export function ChatScreen() {
           verb: asOptionalString(args.verb),
           complement: asOptionalString(args.complement),
           planetId: p?.id,
+          // Cards belong to the module that produced them: reviewing them is
+          // what opens the next one.
+          lessonId: currentModule?.id,
         });
         return { ok: true, flashcard_id: card.id };
+      }
+      case 'record_production': {
+        const target = asOptionalString(args.target);
+        const lessonId = sessionLessonId ?? currentModule?.id;
+        if (!lessonId || !target) return { error: 'missing module or target' };
+        const result = await logProduction.mutateAsync({ lessonId, target });
+        return {
+          ok: true,
+          productions: result.productions,
+          all_structures_done: result.all_structures_done,
+          conversation_done: result.conversation_done,
+        };
+      }
+      case 'complete_module': {
+        if (!currentModule) return { error: 'no module in progress' };
+        const weak = Array.isArray(args.weak_structures)
+          ? args.weak_structures.filter((w): w is string => typeof w === 'string')
+          : [];
+        const result = await completeModule.mutateAsync({
+          lessonId: currentModule.id,
+          weakStructures: weak,
+        });
+        return {
+          ok: true,
+          flashcards_pending: !result.flashcards_done,
+          flashcards_total: result.flashcards_total,
+        };
       }
       case 'master_sentence': {
         const sentenceId = asOptionalString(args.sentence_id);
@@ -414,7 +423,12 @@ export function ChatScreen() {
     }
   };
 
-  const voice = useVoiceConversation(onToolCall);
+  // Generic chat mints a free-conversation session; a lesson chat scopes the
+  // tutor to its planet.
+  const voice = useVoiceConversation(onToolCall, {
+    mode: chatMode,
+    planetId: lessonPlanetId ?? undefined,
+  });
 
   // Merge the voice engine's transcript into the local message list without
   // clobbering tool-call-originated messages (corrections) appended above:
@@ -454,32 +468,47 @@ export function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice.messages, addMessage]);
 
-  /** Opens the live session. Kept separate from the button handler so the
-   * mic primer can run it once the user has acknowledged the modal. */
+  /** Opens the live session. Called from a deliberate user action — tapping
+   * the globe or the composer mic, accepting the mic primer, or starting a
+   * lesson from the planet path, which is a deliberate "teach me this
+   * module" and so opens the session on arrival. */
   const startConversation = async () => {
     await ensureConversation();
+    // Pin the bar to the module this session is teaching — if it closes
+    // mid-session the planet detail advances to the next module, and the bar
+    // must still show the one that just finished.
+    if (chatMode === 'lesson' && currentModule) setSessionLessonId(currentModule.id);
     voice.start();
   };
 
-  /**
-   * Entering the Chat area opens the live session on its own — no button to
-   * press, per the product brief ("activate the microphone automatically").
-   * Switching tabs remounts this screen, so this runs once per visit; the
-   * guard keeps a deliberate stop from immediately restarting. Waits for the
-   * planet so the session is scoped to the right content from its first word.
-   */
-  const autoStartedRef = useRef(false);
+  /** Starting a lesson lands here with the module already chosen: the learner
+   * asked for the lesson, so the tutor opens it rather than leaving them on a
+   * silent screen waiting for a tap. Runs once per lesson entry — the ref
+   * keeps a re-render, or coming back to the tab, from restarting a session
+   * that is already live. */
+  const autoStartedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (autoStartedRef.current || !planet) return;
-    autoStartedRef.current = true;
-    // First ever visit: explain the mic before the OS prompt appears.
+    if (!lessonPlanetId || voice.status !== 'idle') return;
+    if (autoStartedRef.current === lessonPlanetId) return;
+    autoStartedRef.current = lessonPlanetId;
+    // First ever session still explains why the microphone is needed.
     if (!storage.getBoolean(StorageKeys.micPrimerSeen)) {
       setShowMicPrimer(true);
       return;
     }
     startConversation();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [planet]);
+  }, [lessonPlanetId]);
+
+  /** "+" in the composer: close the session and start a fresh conversation.
+   * `openSession` clears the voice transcript on the next start, so the local
+   * list can be emptied here without the old turns being merged back in. */
+  const newConversation = () => {
+    voice.stop();
+    setMessages([]);
+    persistedMessagesRef.current.clear();
+    conversationIdRef.current = null;
+  };
 
   const dismissMicPrimer = () => {
     storage.set(StorageKeys.micPrimerSeen, true);
@@ -531,12 +560,22 @@ export function ChatScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const liveActive = voice.status !== 'idle' && voice.status !== 'error';
-  // The button is a plain start/stop toggle: tap to begin the session, tap
-  // again (square) to end it.
-  const orbLabel = liveActive ? t('chat.orb.stop') : t('chat.orb.start');
+  // 'connected' = a text-only session is open (started by a typed message):
+  // the tutor answers out loud, but the mic is off. It's not "live" for mic
+  // purposes, but the globe still treats it as an open session to stop.
+  const liveActive =
+    voice.status !== 'idle' && voice.status !== 'error' && voice.status !== 'connected';
+  const globeActive = liveActive || voice.status === 'connected';
+  // The globe is a plain start/stop toggle: tap to begin the session, tap
+  // again (square) to end it — including ending a text-only session.
+  const orbLabel = globeActive ? t('chat.orb.stop') : t('chat.orb.start');
 
   const onOrbPress = async () => {
+    // A text-only session (mic off) is open — the globe closes it.
+    if (voice.status === 'connected') {
+      voice.stop();
+      return;
+    }
     // Live in any form (connecting, listening, tutor speaking) → stop.
     if (liveActive) {
       voice.stop();
@@ -553,45 +592,70 @@ export function ChatScreen() {
   const liveHint =
     voice.status === 'connecting'
       ? t('chat.hint.connecting')
-      : voice.status === 'speaking'
-        ? t('chat.hint.tutorSpeaking')
-        : liveActive
-          ? t('chat.hint.micLive')
-          : t('chat.hint.tapToStart');
+      : voice.status === 'connected'
+        ? t('chat.hint.connected')
+        : voice.status === 'speaking'
+          ? t('chat.hint.tutorSpeaking')
+          : liveActive
+            ? t('chat.hint.micLive')
+            : t('chat.hint.tapToStart');
 
+  // --- Bottom composer: typed messages + one-tap voice ----------------------
+  const canSendText = draft.trim().length > 0;
 
-  // "Shadowing" (just heard it, repeat it back) vs. "Falar" (talking freely)
-  // are both just voice.status === 'listening' to the API — split them with
-  // a short timer so the step indicator still reads as a real 4-phase drill.
-  const [listeningPhase, setListeningPhase] = useState<'shadow' | 'speak'>('shadow');
-  useEffect(() => {
-    if (voice.status !== 'listening') {
-      setListeningPhase('shadow');
+  /** Sends the typed draft to the tutor (answered out loud by the live
+   * session) and persists it to the conversation history. */
+  const sendDraft = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    setDraft('');
+    await ensureConversation();
+    const sent = await voice.sendText(text);
+    if (!sent) setDraft(text); // session failed — put it back so it's not lost
+  };
+
+  /** Bottom mic = "start talking". In a full voice session the mic is already
+   * on, so the button is a passive live indicator (barging the tutor in if
+   * she's mid-sentence). While a text-only session is open — or nothing is
+   * running — it starts a full voice session, so one tap always means talk. */
+  const onMicPress = async () => {
+    if (liveActive && voice.micEnabled) {
+      if (voice.status === 'speaking') voice.interrupt();
       return;
     }
-    const timer = setTimeout(() => setListeningPhase('speak'), 4000);
-    return () => clearTimeout(timer);
-  }, [voice.status]);
+    if (!storage.getBoolean(StorageKeys.micPrimerSeen)) {
+      setShowMicPrimer(true);
+      return;
+    }
+    await startConversation();
+  };
 
+
+  // One line of guidance above the transcript: a correction to read, the
+  // tutor's turn to listen to, or the user's turn to talk.
   const lastMessage = messages[messages.length - 1];
-  const currentStep: 1 | 2 | 3 | 4 = lastMessage?.correction
-    ? 4
-    : voice.status === 'connecting' || voice.status === 'speaking'
-      ? 1
-      : voice.status === 'listening'
-        ? listeningPhase === 'shadow'
-          ? 2
-          : 3
-        : 1;
-  const stepPrompt = currentStep === 4 ? t('chat.correctPrompt') : currentStep === 1 ? t('chat.listenPrompt') : t('chat.speakPrompt');
+  const stepPrompt = lastMessage?.correction
+    ? t('chat.correctPrompt')
+    : voice.status === 'listening'
+      ? t('chat.speakPrompt')
+      : t('chat.listenPrompt');
 
-  // The phrase shown big in the middle — the tutor's last real utterance
-  // (correction messages carry a fixed label as their `.text`, not a
-  // phrase, so they're excluded here and shown via the correction card
-  // below instead).
-  const currentPhrase = [...messages].reverse().find((m) => m.role === 'tutor' && m.kind !== 'correction' && m.text.trim())?.text ?? '';
+  // The module this session's tutor teaches, for the drill bar — pinned at
+  // session start (see `startConversation`) so it doesn't jump to the next
+  // module the moment the current one's conversation closes.
+  const progressModule =
+    (sessionLessonId
+      ? planetDetail?.lessons.find((l) => l.id === sessionLessonId)
+      : currentModule) ?? null;
 
-  const showingPraise = lastMessage?.kind === 'praise' && !lastMessage.partial ? lastMessage : null;
+  // The last few messages, rendered as compact chat bubbles above the globe.
+  const recentMessages = messages.slice(-10);
+  // The tutor's latest real utterance — emphasized as the phrase to repeat.
+  // Computed from the same slice the bubbles render, so the focus never
+  // disagrees with what's on screen.
+  const focusPhraseId =
+    [...recentMessages].reverse().find((m) => m.role === 'tutor' && m.kind !== 'correction')?.id ?? null;
+  const lastVisible = recentMessages[recentMessages.length - 1];
 
   return (
     <View style={styles.screen}>
@@ -602,9 +666,11 @@ export function ChatScreen() {
             <View style={styles.planetPill}>
               <View style={[styles.planetDot, { backgroundColor: planet?.color ?? colors.primary }]} />
               <Text style={styles.planetPillText}>
-                {planet
-                  ? t('chat.planetPill', { number: planet.number, title: planet.title })
-                  : t('chat.loadingPlanets')}
+                {chatMode === 'generic'
+                  ? t('chat.genericPill')
+                  : planet
+                    ? t('chat.planetPill', { number: planet.number, title: planet.title })
+                    : t('chat.loadingPlanets')}
               </Text>
             </View>
           </View>
@@ -634,6 +700,12 @@ export function ChatScreen() {
         </Pressable>
       )}
 
+      {/* The lesson's drill bar: how far through this module the learner is,
+          drawn from the server checkpoint. Only lesson chats get one. */}
+      {chatMode === 'lesson' && progressModule && progressModule.structures.length > 0 && (
+        <ModuleProgressBar module={progressModule} />
+      )}
+
       {showHistory ? (
         selectedConversation ? (
           <HistoryDetail
@@ -652,50 +724,144 @@ export function ChatScreen() {
         <ScrollView
           ref={scrollRef}
           style={styles.transcript}
-          contentContainerStyle={styles.transcriptContent}
+          contentContainerStyle={[
+            styles.transcriptContent,
+            // Nothing said yet → the orb owns the screen, centered.
+            recentMessages.length === 0 && styles.transcriptEmpty,
+          ]}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
-          <StepIndicator current={currentStep} />
+          {/* The prompt only appears once there's something to drill — an
+              untouched screen is just the orb and its invitation. */}
+          {recentMessages.length > 0 && <Text style={styles.stepPrompt}>{stepPrompt}</Text>}
 
-          <Text style={styles.stepPrompt}>{stepPrompt}</Text>
-          {currentPhrase ? (
-            <Text style={styles.phraseText}>{currentPhrase}</Text>
+          {recentMessages.length === 0 ? (
+            <View style={styles.hero}>
+              <VoiceGlobe active={globeActive} onPress={onOrbPress} accessibilityLabel={orbLabel} />
+              <Text style={styles.heroTitle}>
+                {t('chat.empty.title', { language: t(`chat.lang.${targetLanguage}` as TranslationKey) })}
+              </Text>
+              {/* Before the session opens this is the pitch; once it's live
+                  the same line carries the connection state, so the promise of
+                  speech is only made when the tutor can actually deliver it. */}
+              <Text style={styles.heroSubtitle}>
+                {globeActive ? liveHint : t('chat.empty.subtitle')}
+              </Text>
+              <Pressable onPress={onOrbPress} hitSlop={10} accessibilityRole="button">
+                <Text style={styles.heroCta}>{globeActive ? t('chat.orb.stop') : t('chat.empty.start')}</Text>
+              </Pressable>
+            </View>
           ) : (
-            <View style={styles.mascotWrap}>
-              <Mascot size={72} />
-              <Text style={styles.waitingText}>{t('chat.waitingForTutor')}</Text>
+            <View style={styles.chatBubbles}>
+              {recentMessages.map((m, i) => {
+                // Corrections render as the card below, not a plain bubble.
+                if (m.kind === 'correction') return null;
+                const isUser = m.role === 'user';
+                // The tutor's latest real utterance is the phrase to repeat —
+                // emphasized so the chat still reads as a drill.
+                const isFocus = m.id === focusPhraseId;
+                return (
+                  <View
+                    key={m.id}
+                    style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowTutor]}
+                  >
+                    <View
+                      style={[
+                        styles.bubble,
+                        isUser ? styles.bubbleUser : styles.bubbleTutor,
+                        isFocus && styles.bubbleFocus,
+                        m.partial && styles.bubblePartial,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          isUser ? styles.bubbleTextUser : styles.bubbleTextTutor,
+                          isFocus && styles.bubbleTextFocus,
+                        ]}
+                      >
+                        {m.text}
+                        {m.partial ? '…' : ''}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
           )}
 
-          <Waveform />
+          {lastVisible?.correction && <CorrectionCard correction={lastVisible.correction} />}
 
-          <View style={styles.orbArea}>
-            <View style={styles.orbRing} />
-            <Pressable
-              style={[styles.orb, !liveActive ? styles.orbIdle : styles.orbActive]}
-              onPress={onOrbPress}
-              accessibilityLabel={orbLabel}
-            >
-              {liveActive ? (
-                <Square size={26} color={colors.textOnPrimary} fill={colors.textOnPrimary} />
-              ) : (
-                <Mic size={30} color={colors.textOnPrimary} />
-              )}
-            </Pressable>
-            <Text style={styles.orbHint}>{liveHint}</Text>
-          </View>
-
-          {showingPraise && (
-            <View style={styles.praisePill}>
-              <View style={styles.praiseCheck}>
-                <CheckCircle2 size={18} color="#FFFFFF" />
-              </View>
-              <Text style={styles.praiseText}>{showingPraise.text}</Text>
+          {recentMessages.length > 0 && (
+            <View style={styles.globeArea}>
+              <VoiceGlobe active={globeActive} onPress={onOrbPress} accessibilityLabel={orbLabel} size={120} />
+              <Text style={styles.orbHint}>{liveHint}</Text>
             </View>
           )}
-
-          {lastMessage?.correction && <CorrectionCard correction={lastMessage.correction} />}
         </ScrollView>
+      )}
+
+      {!showHistory && (
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          {/* Which language this session is in — the mirror of the UI-locale
+              switch in the header, for the language being learned. */}
+          <View style={styles.targetLangRow}>
+            <Globe size={14} color={colors.textMuted} />
+            <Text style={styles.targetLangText}>{t(`language.${targetLanguage}` as TranslationKey)}</Text>
+          </View>
+          <View style={styles.composer}>
+            <Pressable
+              style={styles.composerPlus}
+              onPress={newConversation}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.newConversation')}
+            >
+              <Plus size={20} color={colors.textMuted} />
+            </Pressable>
+            <TextInput
+              style={styles.composerInput}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder={t('chat.input.placeholder')}
+              placeholderTextColor={colors.textFaint}
+              returnKeyType="send"
+              onSubmitEditing={sendDraft}
+              accessibilityLabel={t('chat.input.placeholder')}
+            />
+            {/* Typing takes over the trailing slot: with a draft it's "send",
+                otherwise it's the pair from the design — bare mic to talk into
+                the open session, and the orb button to start/stop one. */}
+            {canSendText ? (
+              <Pressable
+                style={styles.composerSend}
+                onPress={sendDraft}
+                accessibilityRole="button"
+                accessibilityLabel={t('chat.input.send')}
+              >
+                <ArrowUp size={20} color={colors.textOnPrimary} />
+              </Pressable>
+            ) : (
+              <>
+                <Pressable
+                  onPress={onMicPress}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('chat.input.sendAudio')}
+                >
+                  <Mic size={22} color={liveActive ? colors.primary : colors.textMuted} />
+                </Pressable>
+                <Pressable
+                  style={styles.composerSend}
+                  onPress={onOrbPress}
+                  accessibilityRole="button"
+                  accessibilityLabel={orbLabel}
+                >
+                  <AudioLines size={20} color={colors.textOnPrimary} />
+                </Pressable>
+              </>
+            )}
+          </View>
+        </KeyboardAvoidingView>
       )}
 
       <AppTabBar />
@@ -917,6 +1083,60 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#8A6D00',
   },
+  moduleProgress: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    backgroundColor: colors.card,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  moduleProgressTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  moduleProgressTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  moduleProgressCount: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.primary,
+  },
+  moduleProgressSegments: {
+    flexDirection: 'row',
+    marginTop: 8,
+    gap: 6,
+  },
+  moduleProgressSegment: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 3,
+  },
+  moduleProgressTick: {
+    flex: 1,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.border,
+  },
+  moduleProgressTickFilled: {
+    backgroundColor: colors.primary,
+  },
+  moduleProgressTickCurrent: {
+    backgroundColor: colors.primarySoft,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  moduleProgressNow: {
+    marginTop: 8,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
   transcript: {
     flex: 1,
   },
@@ -924,116 +1144,68 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
   },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+  transcriptEmpty: {
+    flexGrow: 1,
     justifyContent: 'center',
-    marginBottom: spacing.lg,
-  },
-  stepItem: {
-    alignItems: 'center',
-    width: 64,
-  },
-  stepLine: {
-    width: 20,
-    height: 2,
-    backgroundColor: colors.border,
-    marginTop: 15,
-  },
-  stepLineActive: {
-    backgroundColor: colors.primary,
-  },
-  stepDot: {
-    width: 30,
-    height: 30,
-    borderRadius: radius.round,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepDotActive: {
-    backgroundColor: colors.primary,
-  },
-  stepDotDone: {
-    backgroundColor: colors.primarySoft,
-  },
-  stepDotText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.textFaint,
-  },
-  stepDotTextActive: {
-    color: colors.textOnPrimary,
-  },
-  stepLabel: {
-    marginTop: 4,
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.textFaint,
-  },
-  stepLabelActive: {
-    color: colors.text,
-    fontWeight: '800',
   },
   stepPrompt: {
     ...typography.caption,
     color: colors.textMuted,
     marginBottom: spacing.sm,
   },
-  phraseText: {
-    ...typography.display,
-    fontSize: 26,
-    lineHeight: 34,
-    color: colors.text,
+  chatBubbles: {
+    gap: spacing.sm,
   },
-  waveform: {
-    flexDirection: 'row',
+  bubbleFocus: {
+    backgroundColor: colors.primary,
+  },
+  bubbleTextFocus: {
+    color: colors.textOnPrimary,
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  bubblePartial: {
+    opacity: 0.6,
+  },
+  hero: {
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    height: 40,
+    paddingHorizontal: spacing.lg,
+  },
+  heroTitle: {
+    ...typography.display,
     marginTop: spacing.xl,
+    color: colors.brand.purpleDeep,
+    textAlign: 'center',
   },
-  waveformBar: {
-    width: 3,
-    borderRadius: 2,
-  },
-  mascotWrap: {
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  waitingText: {
+  heroSubtitle: {
     marginTop: spacing.sm,
-    fontSize: 14,
+    fontSize: 15,
+    lineHeight: 21,
     color: colors.textMuted,
     textAlign: 'center',
   },
-  orbArea: {
-    alignItems: 'center',
+  heroCta: {
     marginTop: spacing.xl,
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.primary,
+    textAlign: 'center',
   },
-  praisePill: {
+  targetLangRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginTop: spacing.xl,
-    backgroundColor: colors.successSoft,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-  },
-  praiseCheck: {
-    width: 30,
-    height: 30,
-    borderRadius: radius.round,
-    backgroundColor: colors.success,
-    alignItems: 'center',
     justifyContent: 'center',
+    gap: 6,
+    marginBottom: spacing.sm,
   },
-  praiseText: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.text,
+  targetLangText: {
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  globeArea: {
+    alignItems: 'center',
+    marginTop: spacing.xl,
   },
   bubbleRow: {
     marginVertical: 4,
@@ -1171,41 +1343,49 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primary,
   },
-  /** Static halo behind the mic button. Previously this pulsed on an infinite
-   * scale/opacity loop; it is now a plain soft ring (the animation read as a
-   * "bounce" and never stopped). */
-  orbRing: {
-    position: 'absolute',
-    top: -6,
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: colors.primarySoft,
-  },
-  orb: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.button,
-  },
-  orbActive: {
-    backgroundColor: colors.primary,
-  },
-  orbIdle: {
-    backgroundColor: colors.primaryPressed,
-  },
-  orbLabel: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.textOnPrimary,
-  },
   orbHint: {
     marginTop: 10,
     fontSize: 13,
     fontWeight: '800',
     color: colors.primary,
+  },
+  composer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.md,
+    // Total margins stay 16pt, but the bar sits ~15pt higher (closer to the
+    // globe, with the breathing room moved below it, above the tab bar).
+    marginTop: 0,
+    marginBottom: 25,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: radius.round,
+    ...shadows.card,
+  },
+  composerPlus: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  composerInput: {
+    flex: 1,
+    fontSize: 15,
+    color: colors.text,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  composerSend: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   historyWrap: {
     flex: 1,

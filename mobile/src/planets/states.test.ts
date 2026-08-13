@@ -16,6 +16,10 @@ const block = (position: number, state: BlockState): PlanetLesson => ({
   description: '',
   state,
   skill: 'conversation',
+  focus: 'focus:have',
+  structures: [],
+  flashcards_total: 0,
+  flashcards_reviewed: 0,
 });
 
 describe('isPlanetFinished', () => {
@@ -57,32 +61,33 @@ describe('currentPlanet', () => {
 });
 
 describe('isBlockDone', () => {
-  it('counts a block flagged for review as done — it was finished once', () => {
-    expect(isBlockDone('review')).toBe(true);
+  it('counts only a module with both halves finished', () => {
     expect(isBlockDone('completed')).toBe(true);
-    expect(isBlockDone('mastered')).toBe(true);
   });
 
-  it('does not count blocks the learner has not finished', () => {
+  /// The whole point of the gate: the conversation alone is not the module.
+  it('does not count a module still owing its flashcards', () => {
+    expect(isBlockDone('flashcards_pending')).toBe(false);
     expect(isBlockDone('locked')).toBe(false);
-    expect(isBlockDone('available')).toBe(false);
-    expect(isBlockDone('in_progress')).toBe(false);
+    expect(isBlockDone('current')).toBe(false);
   });
 });
 
 describe('nextBlock', () => {
-  it('returns the first reachable unfinished block', () => {
-    const blocks = [block(1, 'completed'), block(2, 'in_progress'), block(3, 'locked')];
+  it('returns the first reachable unfinished module', () => {
+    const blocks = [block(1, 'completed'), block(2, 'current'), block(3, 'locked')];
     expect(nextBlock(blocks)?.position).toBe(2);
   });
 
-  it('skips finished blocks including ones awaiting review', () => {
-    const blocks = [block(1, 'review'), block(2, 'mastered'), block(3, 'available')];
-    expect(nextBlock(blocks)?.position).toBe(3);
+  /// A module waiting on its cards is where the learner must go — the path
+  /// does not open past it.
+  it('stops at a module awaiting its flashcards', () => {
+    const blocks = [block(1, 'completed'), block(2, 'flashcards_pending'), block(3, 'locked')];
+    expect(nextBlock(blocks)?.position).toBe(2);
   });
 
-  it('returns null when every block is done', () => {
-    expect(nextBlock([block(1, 'completed'), block(2, 'mastered')])).toBeNull();
+  it('returns null when every module is done', () => {
+    expect(nextBlock([block(1, 'completed'), block(2, 'completed')])).toBeNull();
   });
 
   it('returns null for an empty path', () => {

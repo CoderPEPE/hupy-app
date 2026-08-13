@@ -24,11 +24,14 @@ const PLANET_LOOKS: Record<PlanetStatus, Look> = {
 
 const BLOCK_LOOKS: Record<BlockState, Look> = {
   locked: { fg: colors.textFaint, bg: colors.surface, labelKey: 'state.locked' },
-  available: { fg: colors.info, bg: colors.infoSoft, labelKey: 'state.available' },
-  in_progress: { fg: colors.primary, bg: colors.primarySoft, labelKey: 'state.inProgress' },
+  current: { fg: colors.primary, bg: colors.primarySoft, labelKey: 'state.inProgress' },
+  // The conversation is behind them; the module's cards are what is left.
+  flashcards_pending: {
+    fg: colors.brand.orange,
+    bg: colors.warningSoft,
+    labelKey: 'state.flashcardsPending',
+  },
   completed: { fg: colors.success, bg: colors.successSoft, labelKey: 'state.completed' },
-  review: { fg: colors.brand.orange, bg: colors.warningSoft, labelKey: 'state.review' },
-  mastered: { fg: '#B45309', bg: '#FEF3C7', labelKey: 'state.mastered' },
 };
 
 export function planetStateLook(status: PlanetStatus): Look {
@@ -36,7 +39,7 @@ export function planetStateLook(status: PlanetStatus): Look {
 }
 
 export function blockStateLook(state: BlockState): Look {
-  return BLOCK_LOOKS[state] ?? BLOCK_LOOKS.available;
+  return BLOCK_LOOKS[state] ?? BLOCK_LOOKS.current;
 }
 
 export function StateChip({

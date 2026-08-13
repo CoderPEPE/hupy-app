@@ -79,6 +79,16 @@ describe('ui store — decks', () => {
     useUiStore.getState().closeDeck();
     expect(useUiStore.getState().activeDeckId).toBeNull();
   });
+
+  /// "Start review" for a module whose conversation is done lands on the
+  /// Flashcards tab with that module's deck open — never another chat lesson.
+  it('reviewModule opens the module deck on the flashcards tab', () => {
+    useUiStore.getState().reviewModule('lesson-4');
+    expect(useUiStore.getState().activeTab).toBe('flashcards');
+    expect(useUiStore.getState().activeDeckId).toBe('lesson-4');
+    expect(useUiStore.getState().lessonIntro).toBeNull();
+    expect(useUiStore.getState().lessonPlanetId).toBeNull();
+  });
 });
 
 describe('ui store — unlock notice', () => {

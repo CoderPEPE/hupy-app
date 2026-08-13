@@ -17,8 +17,11 @@ pub mod voice;
 pub use conversation::{Conversation, Correction, Message, NewCorrection, NewMessage};
 pub use flashcard::{Card, NewCard};
 pub use gamification::UserStats;
-pub use planet::{ActivePlanet, LessonStep, Planet, PlanetProgress, Sentence, TutorSentence};
+pub use planet::{
+    ActivePlanet, LessonStep, ModuleProgress, Planet, PlanetLesson, PlanetProgress, Sentence,
+    TutorSentence,
+};
 pub use refresh_token::RefreshToken;
-pub use story::PlanetStory;
+pub use story::{PlanetStory, PlanetStorySeed};
 pub use user::{NewUser, User};
 pub use voice::TutorVoice;

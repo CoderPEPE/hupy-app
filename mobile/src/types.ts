@@ -108,16 +108,23 @@ export type PlanetLessonKind =
   | 'conversation'
   | 'mission';
 
-/** The spec's six block states (§6 "Estados do bloco"). */
-export type BlockState =
-  | 'locked'
-  | 'available'
-  | 'in_progress'
-  | 'completed'
-  | 'review'
-  | 'mastered';
+/** A module's place in the learning cycle. A module is only finished once the
+ * conversation AND its flashcards are done — `flashcards_pending` is the gap
+ * between the two, where the next module stays shut. */
+export type BlockState = 'locked' | 'current' | 'flashcards_pending' | 'completed';
 
-/** One block of the planet's ten-block path. */
+/** One chunk a module teaches: a whole spoken sentence, never a bare word. */
+export type Structure = {
+  target: string;
+  base: string;
+  /** How many times the learner has produced it correctly in the current
+   * module conversation — the checkpoint that survives app restarts. */
+  productions: number;
+  /** True once `productions` reaches the module's requirement (3). */
+  done: boolean;
+};
+
+/** One module of the planet's ten-module path. */
 export type PlanetLesson = {
   id: string;
   position: number;
@@ -127,16 +134,24 @@ export type PlanetLesson = {
   state: BlockState;
   /** The progress metric this block trains — what its review would drill. */
   skill: string;
+  /** What this module drills: `focus:have`, `mix`, `past`, `questions`, … */
+  focus: string;
+  /** The chunks taught here. */
+  structures: Structure[];
+  /** The module's own flashcards: the second half of the gate. */
+  flashcards_total: number;
+  flashcards_reviewed: number;
 };
 
-/** A block the learner has finished (including one flagged for review). */
+/** A module the learner has fully finished — conversation and flashcards. */
 export function isBlockDone(state: BlockState): boolean {
-  return state === 'completed' || state === 'review' || state === 'mastered';
+  return state === 'completed';
 }
 
-/** The next block to open: the first one that is reachable and unfinished. */
+/** The module the learner is on: the first one still unfinished, whether it
+ * needs the conversation or only its flashcards. */
 export function nextBlock(blocks: PlanetLesson[]): PlanetLesson | null {
-  return blocks.find((b) => b.state === 'available' || b.state === 'in_progress') ?? null;
+  return blocks.find((b) => b.state === 'current' || b.state === 'flashcards_pending') ?? null;
 }
 
 export type LessonStepKind = 'teach' | 'repeat' | 'question' | 'review' | 'praise' | 'correction';
@@ -215,6 +230,9 @@ export type Flashcard = {
   verb: string;
   complement: string;
   planet_id: string | null;
+  /** The module whose conversation produced this card — reviewing the whole
+   * set is what opens the next module. */
+  lesson_id: string | null;
   correction_id: string | null;
   source: string;
   interval_days: number;
