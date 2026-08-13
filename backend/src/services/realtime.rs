@@ -4,7 +4,7 @@
 
 use crate::db::DbPool;
 use crate::errors::{AppError, Result};
-use crate::models::ActivePlanet;
+use crate::models::{ActivePlanet, PlanetLesson};
 use crate::repositories;
 use crate::services;
 use serde_json::{json, Value};
@@ -404,11 +404,38 @@ async fn build_instructions_for(
         }
     }
 
-    let done = services::curriculum::completed_count(&modules, &module_progress);
+    // The spec's "a IA precisa conhecer o progresso do aluno": not a count,
+    // but which modules are behind them and what they can already say.
+    let states = services::curriculum::module_states(&modules, &module_progress);
+    let finished: Vec<&PlanetLesson> = modules
+        .iter()
+        .zip(&states)
+        .filter(|(_, s)| s.is_completed())
+        .map(|(m, _)| m)
+        .collect();
     out.push_str(&format!(
-        "Modules finished: {done} of {}\n\n",
-        modules.len()
+        "Modules finished: {} of {}{}\n",
+        finished.len(),
+        modules.len(),
+        if finished.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " — {}",
+                finished
+                    .iter()
+                    .map(|m| format!("{} ({})", m.position, m.title))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        }
     ));
+    if !finished.is_empty() {
+        out.push_str(
+            "Their flashcards are done too — that is what opened the current module.\n",
+        );
+    }
+    out.push('\n');
 
     match current {
         Some(module) => {
@@ -455,6 +482,32 @@ async fn build_instructions_for(
                 for s in &structures {
                     out.push_str(&format!("- {} — {}\n", s.target, s.base));
                 }
+            }
+
+            // The other half of the gate, in the tutor's own briefing: what
+            // this module's deck looks like and what it is holding shut.
+            let (cards_total, cards_reviewed) =
+                repositories::modules::flashcard_counts(pool, user_id, module.id).await?;
+            let conversation_done = module_progress
+                .get(&module.id)
+                .is_some_and(|p| p.conversation_done);
+            if conversation_done {
+                out.push_str(&format!(
+                    "\nSTATUS: this module's conversation is already DONE. {cards_reviewed} of \
+                     {cards_total} of its flashcards are reviewed, and module {} stays LOCKED \
+                     until they all are. Do not teach this module again from scratch and do not \
+                     call complete_module: hold a short review of the structures above, then tell \
+                     them their flashcards are what opens the next module.\n",
+                    module.position + 1,
+                ));
+            } else {
+                out.push_str(&format!(
+                    "\nSTATUS: conversation in progress. Flashcards for this module: {cards_total} \
+                     so far ({cards_reviewed} reviewed) — they are created by your create_flashcard \
+                     calls, and the learner must review them before module {} opens. Make one for \
+                     each structure you drill here.\n",
+                    module.position + 1,
+                ));
             }
 
             // Earlier modules of this planet are fair game as review — the

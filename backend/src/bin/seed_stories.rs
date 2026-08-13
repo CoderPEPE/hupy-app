@@ -5,10 +5,11 @@
 //! is written here instead — ahead of time, for all 60 planets of all six
 //! courses — and the app just plays it.
 //!
-//! Each story is written by the chat model from the planet's own sentences
-//! (all ten blocks) plus a sample of earlier-planet phrases for cumulative
-//! review. If the model call fails, the deterministic template writer stands
-//! in, so no planet is ever left without a story.
+//! Each story is written by the chat model from the chunks the planet's ten
+//! modules actually taught, plus a sample of earlier-planet phrases for
+//! cumulative review — so the learner recognises their own lessons inside it
+//! rather than meeting new material. If the model call fails, the
+//! deterministic template writer stands in, so no planet is left without one.
 //!
 //! Usage:
 //!
@@ -30,6 +31,7 @@ use std::sync::Arc;
 
 struct Args {
     course: Option<String>,
+    planet: Option<i32>,
     limit: Option<usize>,
     force: bool,
     concurrency: usize,
@@ -47,6 +49,7 @@ fn split_course(course: &str) -> Result<(String, String), String> {
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
         course: None,
+        planet: None,
         limit: None,
         force: false,
         concurrency: 4,
@@ -74,6 +77,14 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
                 // error instead of a run that quietly seeds nothing.
                 split_course(&value(i)?)?;
                 args.course = Some(value(i)?);
+                i += 2;
+            }
+            "--planet" => {
+                args.planet = Some(
+                    value(i)?
+                        .parse::<i32>()
+                        .map_err(|e| format!("--planet: {e}"))?,
+                );
                 i += 2;
             }
             "--limit" => {
@@ -104,7 +115,7 @@ async fn main() {
     let args = match parse_args(&argv) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("{e}\n\nusage: seed_stories [--course pt-en] [--limit N] [--concurrency N] [--force]");
+            eprintln!("{e}\n\nusage: seed_stories [--course pt-en] [--planet N] [--limit N] [--concurrency N] [--force]");
             std::process::exit(2);
         }
     };
@@ -137,6 +148,9 @@ async fn main() {
             Some((base, target)) => &p.base_language == base && &p.language == target,
             None => true,
         })
+        // One planet across every course — how a single planet's content gets
+        // rewritten without touching the other 59.
+        .filter(|p| args.planet.is_none_or(|n| p.number == n))
         .collect();
     if let Some(limit) = args.limit {
         todo.truncate(limit);
@@ -192,17 +206,31 @@ async fn write_story(
     model: &str,
     planet: &Planet,
 ) -> Result<(usize, i64, String), String> {
-    let sentences = repositories::planets::course_sentences(
-        pool,
-        planet.id,
-        &planet.base_language,
-        &planet.language,
-    )
-    .await
-    .map_err(|e| format!("{e:?}"))?;
-    if sentences.is_empty() {
-        return Err("planet has no sentences to build a story from".into());
+    // The story is built from what the learner actually worked through: the
+    // ten modules' chunks, in curriculum order.
+    let modules = repositories::modules::lessons_for(pool, planet.id)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    let studied: Vec<(String, Vec<(String, String)>)> = modules
+        .iter()
+        .map(|m| {
+            (
+                format!("Module {} — {}", m.position, m.title),
+                services::curriculum::structures(&m.structures)
+                    .into_iter()
+                    .map(|s| (s.target, s.base))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .filter(|(_, chunks)| !chunks.is_empty())
+        .collect();
+    if studied.is_empty() {
+        return Err("planet has no authored modules to build a story from".into());
     }
+    let flat: Vec<(String, String)> = studied
+        .iter()
+        .flat_map(|(_, chunks)| chunks.iter().cloned())
+        .collect();
     let review = repositories::planets::course_review_sample(
         pool,
         planet.number,
@@ -218,13 +246,13 @@ async fn write_story(
     // Seeded stories belong to the course, not to a person: no learner name,
     // so the narrator introduces themselves without one.
     let prompt =
-        services::stories::story_prompt(planet, &sentences, &review, "", target_name, base_name);
+        services::stories::story_prompt(planet, &studied, &review, "", target_name, base_name);
 
     let (story, source) = if api_key.is_empty() {
         // No key at all is a deliberate choice — write the deterministic
         // story so the course is still playable.
         (
-            services::stories::build_story(planet, &sentences, &review, ""),
+            services::stories::build_story(planet, &flat, &review, ""),
             "template".to_string(),
         )
     } else {

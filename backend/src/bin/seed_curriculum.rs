@@ -34,6 +34,7 @@ const CHUNKS_PER_MODULE: usize = 7;
 
 struct Args {
     course: Option<String>,
+    planet: Option<i32>,
     limit: Option<usize>,
     force: bool,
     concurrency: usize,
@@ -49,6 +50,7 @@ fn split_course(course: &str) -> Result<(String, String), String> {
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
         course: None,
+        planet: None,
         limit: None,
         force: false,
         concurrency: 6,
@@ -74,6 +76,14 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--course" => {
                 split_course(&value(i)?)?;
                 args.course = Some(value(i)?);
+                i += 2;
+            }
+            "--planet" => {
+                args.planet = Some(
+                    value(i)?
+                        .parse::<i32>()
+                        .map_err(|e| format!("--planet: {e}"))?,
+                );
                 i += 2;
             }
             "--limit" => {
@@ -104,7 +114,7 @@ async fn main() {
     let args = match parse_args(&argv) {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("{e}\n\nusage: seed_curriculum [--course pt-en] [--limit N] [--concurrency N] [--force]");
+            eprintln!("{e}\n\nusage: seed_curriculum [--course pt-en] [--planet N] [--limit N] [--concurrency N] [--force]");
             std::process::exit(2);
         }
     };
@@ -139,6 +149,9 @@ async fn main() {
             Some((base, target)) => &p.base_language == base && &p.language == target,
             None => true,
         })
+        // One planet across every course — how a single planet's content gets
+        // rewritten without touching the other 59.
+        .filter(|p| args.planet.is_none_or(|n| p.number == n))
         .collect();
     if let Some(limit) = args.limit {
         todo.truncate(limit);

@@ -181,7 +181,14 @@ pub fn focus_verbs(value: &Value) -> Vec<String> {
 /// and the verb "to be" before the frequency list takes over).
 pub fn focus_slots(planet_number: i32) -> [&'static str; 3] {
     match planet_number {
-        1 => ["greetings", "introductions", "origin and residence"],
+        // The spec's opening planet: greetings, who you are (name and age),
+        // and where you are from — the first things a learner can actually
+        // use with a stranger.
+        1 => [
+            "greetings and how you are",
+            "name, introductions and age",
+            "origin and residence",
+        ],
         2 => ["to be (am/is/are)", "subjects and connectors", "to be in context"],
         n => {
             let trios = VERB_TRIOS;
@@ -398,7 +405,10 @@ mod tests {
 
     #[test]
     fn the_first_planets_teach_survival_phrases_before_the_verb_list() {
-        assert_eq!(focus_slots(1)[0], "greetings");
+        assert!(focus_slots(1)[0].starts_with("greetings"));
+        // The spec lists age among planet 1's structures ("Quantos anos você
+        // tem?"), so it must have a slot of its own.
+        assert!(focus_slots(1)[1].contains("age"));
         assert!(focus_slots(2)[0].starts_with("to be"));
         assert_eq!(focus_slots(3), ["have", "need", "can"]);
     }
