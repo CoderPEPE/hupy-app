@@ -23,6 +23,8 @@ export function createFlashcard(input: {
   verb?: string;
   complement?: string;
   planetId?: string;
+  /** The module whose conversation produced this card — it gates that module. */
+  lessonId?: string;
 }) {
   return apiRequest<Flashcard>('/api/flashcards', {
     method: 'POST',
@@ -35,6 +37,7 @@ export function createFlashcard(input: {
       verb: input.verb,
       complement: input.complement,
       planet_id: input.planetId,
+      lesson_id: input.lessonId,
     },
   });
 }

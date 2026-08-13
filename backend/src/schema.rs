@@ -101,6 +101,7 @@ diesel::table! {
         next_review_at -> Timestamptz,
         created_at -> Timestamptz,
         verified_live -> Bool,
+        lesson_id -> Nullable<Uuid>,
     }
 }
 
@@ -145,6 +146,8 @@ diesel::table! {
         kind -> Text,
         title -> Text,
         description -> Text,
+        focus -> Text,
+        structures -> Jsonb,
     }
 }
 
@@ -186,6 +189,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    planet_story_seeds (id) {
+        id -> Uuid,
+        planet_id -> Uuid,
+        title -> Text,
+        sentences -> Jsonb,
+        translation -> Jsonb,
+        duration_secs -> Int4,
+        source -> Text,
+        created_at -> Timestamptz,
+        updated_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     planets (id) {
         id -> Uuid,
         number -> Int4,
@@ -205,6 +222,7 @@ diesel::table! {
         #[max_length = 8]
         level -> Varchar,
         goal -> Text,
+        focus_verbs -> Jsonb,
     }
 }
 
@@ -253,6 +271,17 @@ diesel::table! {
         user_id -> Uuid,
         badge_id -> Uuid,
         earned_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
+    user_module_progress (user_id, lesson_id) {
+        user_id -> Uuid,
+        lesson_id -> Uuid,
+        conversation_done -> Bool,
+        flashcards_done -> Bool,
+        weak_structures -> Jsonb,
+        updated_at -> Timestamptz,
     }
 }
 
@@ -314,6 +343,7 @@ diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(corrections -> conversations (conversation_id));
 diesel::joinable!(corrections -> users (user_id));
 diesel::joinable!(flashcards -> corrections (correction_id));
+diesel::joinable!(flashcards -> planet_lessons (lesson_id));
 diesel::joinable!(flashcards -> planets (planet_id));
 diesel::joinable!(flashcards -> users (user_id));
 diesel::joinable!(lesson_steps -> planets (planet_id));
@@ -322,9 +352,12 @@ diesel::joinable!(planet_lessons -> planets (planet_id));
 diesel::joinable!(planet_sentences -> planets (planet_id));
 diesel::joinable!(planet_stories -> planets (planet_id));
 diesel::joinable!(planet_stories -> users (user_id));
+diesel::joinable!(planet_story_seeds -> planets (planet_id));
 diesel::joinable!(refresh_tokens -> users (user_id));
 diesel::joinable!(user_badges -> badges (badge_id));
 diesel::joinable!(user_badges -> users (user_id));
+diesel::joinable!(user_module_progress -> planet_lessons (lesson_id));
+diesel::joinable!(user_module_progress -> users (user_id));
 diesel::joinable!(user_planet_progress -> planets (planet_id));
 diesel::joinable!(user_planet_progress -> users (user_id));
 diesel::joinable!(user_sentence_progress -> planet_sentences (sentence_id));
@@ -342,11 +375,13 @@ diesel::allow_tables_to_appear_in_same_query!(
     planet_lessons,
     planet_sentences,
     planet_stories,
+    planet_story_seeds,
     planets,
     refresh_tokens,
     tts_audio,
     tutor_voices,
     user_badges,
+    user_module_progress,
     user_planet_progress,
     user_sentence_progress,
     user_stats,

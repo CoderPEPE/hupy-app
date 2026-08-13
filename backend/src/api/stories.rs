@@ -1,13 +1,18 @@
-//! Personalized audio-story endpoints.
+//! Audio-story endpoints.
 //!
-//! A story is generated per (user, planet) once the planet is conquered
-//! (mastery >= unlock threshold). The generated story is deterministic and
-//! server-side — no model call — so it works offline of any AI provider and
-//! stays consistent with the learner's actual studied sentences.
+//! Stories are pre-generated per planet by the `seed_stories` binary and
+//! ship with the database, so the Audio tab plays immediately instead of
+//! asking the learner to generate anything. A planet's story is readable
+//! once all ten of its modules are finished — the reward at the end of the
+//! learning cycle, not something a mastery average lets slip out early.
+//!
+//! The per-user `planet_stories` row is only about playback: it is created
+//! from the seed the first time someone saves a position, so resume works
+//! without copying the curriculum for every learner up front.
 
 use crate::errors::{AppError, Result};
 use crate::middleware::auth::AuthUser;
-use crate::models::{Planet, PlanetStory};
+use crate::models::{PlanetStory, PlanetStorySeed};
 use crate::repositories;
 use crate::services;
 use crate::state::AppState;
@@ -22,7 +27,6 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list_stories))
         .route("/{planet_id}", get(get_story))
-        .route("/{planet_id}/generate", post(generate_story))
         .route("/{planet_id}/progress", post(save_progress))
 }
 
@@ -46,28 +50,34 @@ pub struct StoryJson {
     pub updated_at: DateTime<Utc>,
 }
 
-impl From<&PlanetStory> for StoryJson {
-    fn from(s: &PlanetStory) -> Self {
-        fn strings(v: &serde_json::Value) -> Vec<String> {
-            v.as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default()
-        }
+fn strings(v: &serde_json::Value) -> Vec<String> {
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+impl StoryJson {
+    /// The planet's seeded story, carrying this learner's playback position
+    /// when they have one. The transcript always comes from the seed, so a
+    /// re-seeded story reaches everyone without rewriting their rows.
+    fn from_seed(seed: &PlanetStorySeed, progress: Option<&PlanetStory>) -> Self {
         Self {
-            id: s.id,
-            title: s.title.clone(),
-            status: s.status.clone(),
-            sentences: strings(&s.sentences),
-            translation: strings(&s.translation),
-            duration_secs: s.duration_secs,
-            position_secs: s.position_secs,
-            completed: s.completed,
-            created_at: s.created_at,
-            updated_at: s.updated_at,
+            id: seed.id,
+            title: seed.title.clone(),
+            // Seeds are only ever written complete — there is no "generating"
+            // state left for the client to poll through.
+            status: "ready".into(),
+            sentences: strings(&seed.sentences),
+            translation: strings(&seed.translation),
+            duration_secs: seed.duration_secs,
+            position_secs: progress.map(|p| p.position_secs).unwrap_or(0),
+            completed: progress.is_some_and(|p| p.completed),
+            created_at: seed.created_at,
+            updated_at: progress.map_or(seed.updated_at, |p| p.updated_at),
         }
     }
 }
@@ -87,7 +97,8 @@ pub struct StoryPlanetJson {
 #[derive(Serialize)]
 pub struct StoryListEntry {
     pub planet: StoryPlanetJson,
-    /// True once the planet is conquered (or its story already exists).
+    /// True once every module of the planet is finished (or the learner has
+    /// already started listening).
     pub unlocked: bool,
     pub story: Option<StoryJson>,
 }
@@ -118,12 +129,31 @@ async fn list_stories(
     let stories = repositories::stories::list_for_user(&state.pool, user_id).await?;
     let by_planet: std::collections::HashMap<Uuid, PlanetStory> =
         stories.into_iter().map(|s| (s.planet_id, s)).collect();
+    let seeds = repositories::story_seeds::all(&state.pool).await?;
+    let seed_by_planet: std::collections::HashMap<Uuid, PlanetStorySeed> =
+        seeds.into_iter().map(|s| (s.planet_id, s)).collect();
+
+    // The story is the planet's reward: it opens when all ten modules are
+    // finished (conversation + flashcards each), not when a mastery average
+    // crosses a line.
+    let completed_modules =
+        repositories::modules::completed_counts_by_planet(&state.pool, user_id).await?;
 
     let mut out = Vec::with_capacity(all.len());
     for p in &all {
-        let progress = repositories::planets::load_progress(&state.pool, user_id, p.id).await?;
-        let story = by_planet.get(&p.id);
-        let unlocked = story.is_some() || services::planets::is_conquered(&progress, p.unlock_mastery);
+        let listened = by_planet.get(&p.id);
+        let done = completed_modules.get(&p.id).copied().unwrap_or(0);
+        let unlocked =
+            listened.is_some() || done >= services::curriculum::MODULES_PER_PLANET as i64;
+        // Withheld until then: hearing the planet's story before working
+        // through its modules would spoil the point of it.
+        let story = if unlocked {
+            seed_by_planet
+                .get(&p.id)
+                .map(|seed| StoryJson::from_seed(seed, listened))
+        } else {
+            None
+        };
         out.push(StoryListEntry {
             planet: StoryPlanetJson {
                 id: p.id,
@@ -134,7 +164,7 @@ async fn list_stories(
                 goal: p.goal.clone(),
             },
             unlocked,
-            story: story.map(StoryJson::from),
+            story,
         });
     }
     Ok(Json(out))
@@ -145,135 +175,11 @@ async fn get_story(
     AuthUser(user_id): AuthUser,
     Path(planet_id): Path<Uuid>,
 ) -> Result<Json<StoryJson>> {
-    repositories::stories::find(&state.pool, user_id, planet_id)
+    let seed = repositories::story_seeds::find(&state.pool, planet_id)
         .await?
-        .map(|s| Json(StoryJson::from(&s)))
-        .ok_or_else(|| AppError::not_found("story not found"))
-}
-
-/// Generates (or regenerates) the personalized story for a conquered planet.
-/// Unlocking requires the planet to be completed — exactly the rule that
-/// marks the planet conquered, so a story is only ever earned for real.
-async fn generate_story(
-    State(state): State<AppState>,
-    AuthUser(user_id): AuthUser,
-    Path(planet_id): Path<Uuid>,
-) -> Result<Json<StoryJson>> {
-    let planet: Planet = repositories::planets::find(&state.pool, planet_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("planet not found"))?;
-
-    let progress = repositories::planets::load_progress(&state.pool, user_id, planet_id).await?;
-    let already = repositories::stories::find(&state.pool, user_id, planet_id).await?;
-    if already.is_none() && !services::planets::is_conquered(&progress, planet.unlock_mastery) {
-        return Err(AppError::conflict(
-            "complete this planet to unlock its story",
-        ));
-    }
-
-    let user = repositories::users::find_by_id(&state.pool, user_id)
-        .await?
-        .ok_or_else(|| AppError::unauthorized("user not found"))?;
-    let name = user.name;
-    let sentences = repositories::planets::tutor_sentences(
-        &state.pool,
-        user_id,
-        planet_id,
-        &planet.base_language,
-        &planet.language,
-    )
-    .await?;
-    // The story is cumulative (spec): mostly this planet, with important
-    // phrases from earlier planets woven back in for review.
-    let review = repositories::planets::cumulative_review_sample(
-        &state.pool,
-        user_id,
-        planet.number,
-        services::stories::REVIEW_SENTENCES,
-        &planet.base_language,
-        &planet.language,
-    )
-    .await?;
-
-    // Without an API key there is no AI writer — fall back to the template
-    // immediately so the learner still gets their story, synchronously.
-    if state.openai_api_key().is_empty() {
-        let story = services::stories::build_story(&planet, &sentences, &review, &name);
-        let saved = save_story(&state, user_id, planet_id, story, "ready").await?;
-        return Ok(Json(StoryJson::from(&saved)));
-    }
-
-    // A 10–20 minute narrative takes far longer to write than a request should
-    // hang for, so the story is marked "generating" and finished in the
-    // background; the Audio tab polls until it turns "ready".
-    let placeholder = repositories::stories::upsert(
-        &state.pool,
-        user_id,
-        planet_id,
-        &format!("{} — My Story", planet.title),
-        &[],
-        &[],
-        0,
-        "generating",
-    )
-    .await?;
-
-    let (target_name, base_name) =
-        services::realtime::language_names(&planet.base_language, &planet.language);
-    let prompt = services::stories::story_prompt(
-        &planet,
-        &sentences,
-        &review,
-        &name,
-        target_name,
-        base_name,
-    );
-    let bg = state.clone();
-    tokio::spawn(async move {
-        let written = services::stories::generate_with_ai(
-            &bg.http_client,
-            bg.openai_api_key(),
-            &bg.config.story_model,
-            &planet,
-            &prompt,
-        )
-        .await;
-        let story = match written {
-            Ok(s) => s,
-            Err(e) => {
-                // A model failure must not leave the planet without a story —
-                // the deterministic writer always produces a playable one.
-                tracing::warn!("AI story generation failed, using the template: {e:?}");
-                services::stories::build_story(&planet, &sentences, &review, &name)
-            }
-        };
-        if let Err(e) = save_story(&bg, user_id, planet_id, story, "ready").await {
-            tracing::error!("failed to persist generated story: {e:?}");
-        }
-    });
-
-    Ok(Json(StoryJson::from(&placeholder)))
-}
-
-/// Persists a finished story transcript.
-async fn save_story(
-    state: &AppState,
-    user_id: Uuid,
-    planet_id: Uuid,
-    story: services::stories::StoryText,
-    status: &str,
-) -> Result<PlanetStory> {
-    repositories::stories::upsert(
-        &state.pool,
-        user_id,
-        planet_id,
-        &story.title,
-        &story.sentences,
-        &story.translation,
-        story.duration_secs,
-        status,
-    )
-    .await
+        .ok_or_else(|| AppError::not_found("story not found"))?;
+    let listened = repositories::stories::find(&state.pool, user_id, planet_id).await?;
+    Ok(Json(StoryJson::from_seed(&seed, listened.as_ref())))
 }
 
 /// Saves playback position + completion so the player resumes where the
@@ -285,14 +191,37 @@ async fn save_progress(
     Json(body): Json<ProgressUpdate>,
 ) -> Result<Json<StoryJson>> {
     let position = body.position_secs.max(0);
-    repositories::stories::update_progress(
+    let seed = repositories::story_seeds::find(&state.pool, planet_id)
+        .await?
+        .ok_or_else(|| AppError::not_found("story not found"))?;
+
+    // First listen: the learner has no row yet. Create one from the seed so
+    // there is something to hang the position on — the transcript itself is
+    // still read from the seed, this row is only their bookmark.
+    if repositories::stories::find(&state.pool, user_id, planet_id)
+        .await?
+        .is_none()
+    {
+        repositories::stories::upsert(
+            &state.pool,
+            user_id,
+            planet_id,
+            &seed.title,
+            &strings(&seed.sentences),
+            &strings(&seed.translation),
+            i64::from(seed.duration_secs),
+            "ready",
+        )
+        .await?;
+    }
+
+    let listened = repositories::stories::update_progress(
         &state.pool,
         user_id,
         planet_id,
         position,
         body.completed,
     )
-    .await?
-    .map(|s| Json(StoryJson::from(&s)))
-    .ok_or_else(|| AppError::not_found("story not found"))
+    .await?;
+    Ok(Json(StoryJson::from_seed(&seed, listened.as_ref())))
 }

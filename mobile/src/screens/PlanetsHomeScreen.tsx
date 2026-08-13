@@ -54,7 +54,6 @@ type BlockLook = {
 
 function lookForBlock(block: PlanetLesson): BlockLook {
   switch (block.state) {
-    case 'mastered':
     case 'completed':
       return {
         labelKey: 'state.completed',
@@ -64,17 +63,16 @@ function lookForBlock(block: PlanetLesson): BlockLook {
         done: true,
         locked: false,
       };
-    case 'review':
+    case 'flashcards_pending':
       return {
-        labelKey: 'state.review',
+        labelKey: 'state.flashcardsPending',
         tint: colors.brand.orange,
         iconBg: '#FFEEDD',
         current: true,
-        done: true,
+        done: false,
         locked: false,
       };
-    case 'in_progress':
-    case 'available':
+    case 'current':
       return {
         labelKey: 'state.inProgress',
         tint: colors.brand.orange,
@@ -118,7 +116,7 @@ function BlockRow({ block, onPress }: { block: PlanetLesson; onPress: () => void
       ) : look.current ? (
         <Pressable style={styles.continuePill} onPress={onPress} accessibilityRole="button">
           <Text style={styles.continuePillText}>
-            {block.state === 'review' ? t('planets.startReview') : t('planets.continue')}
+            {block.state === 'flashcards_pending' ? t('planets.reviewCards') : t('planets.continue')}
           </Text>
         </Pressable>
       ) : (

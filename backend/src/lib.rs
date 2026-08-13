@@ -69,6 +69,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .nest("/api/flashcards", api::flashcards::router(state.clone()))
         .nest("/api/gamification", api::gamification::router())
+        .nest("/api/modules", api::modules::router())
         .nest("/api/stories", api::stories::router())
         .nest("/api/tts", api::tts::router(state.clone()))
         .nest("/api/voices", api::voices::router())

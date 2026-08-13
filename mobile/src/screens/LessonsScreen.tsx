@@ -13,6 +13,7 @@ import { colors, radius, spacing, typography } from '../theme';
 import { isBlockDone, type Planet, type PlanetLesson } from '../types';
 
 function LessonRow({ lesson, onPress }: { lesson: PlanetLesson; onPress: () => void }) {
+  const t = useT();
   const locked = lesson.state === 'locked';
   const done = isBlockDone(lesson.state);
 
@@ -38,8 +39,17 @@ function LessonRow({ lesson, onPress }: { lesson: PlanetLesson; onPress: () => v
         <Text style={styles.lessonDesc} numberOfLines={1}>
           {lesson.description}
         </Text>
-        <View style={{ marginTop: 3 }}>
+        <View style={styles.lessonStateRow}>
           <StateChip block={lesson.state} />
+          {/* The half of the gate that is left: the module's own cards. */}
+          {lesson.state === 'flashcards_pending' && lesson.flashcards_total > 0 && (
+            <Text style={styles.lessonCards}>
+              {t('lessons.cardsProgress', {
+                done: lesson.flashcards_reviewed,
+                total: lesson.flashcards_total,
+              })}
+            </Text>
+          )}
         </View>
       </View>
       {!locked && <ChevronRight size={18} color={colors.textFaint} />}
@@ -145,6 +155,17 @@ const styles = StyleSheet.create({
   loadingText: {
     ...typography.caption,
     color: colors.textFaint,
+  },
+  lessonStateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 3,
+  },
+  lessonCards: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.brand.orange,
   },
   lessonRow: {
     padding: spacing.sm,

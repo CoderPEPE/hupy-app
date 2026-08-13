@@ -54,6 +54,8 @@ pub struct CardJson {
     pub verb: String,
     pub complement: String,
     pub planet_id: Option<Uuid>,
+    /// The module whose conversation produced this card.
+    pub lesson_id: Option<Uuid>,
     pub correction_id: Option<Uuid>,
     pub source: String,
     pub interval_days: i32,
@@ -81,6 +83,7 @@ impl CardJson {
             verb: c.verb.clone(),
             complement: c.complement.clone(),
             planet_id: c.planet_id,
+            lesson_id: c.lesson_id,
             correction_id: c.correction_id,
             source: c.source.clone(),
             interval_days: c.interval_days,
@@ -111,6 +114,9 @@ pub struct CreateCard {
     pub verb: Option<String>,
     pub complement: Option<String>,
     pub planet_id: Option<Uuid>,
+    /// The module this card belongs to — set when the tutor mints it during a
+    /// module's conversation, so the module can gate on its own set.
+    pub lesson_id: Option<Uuid>,
     pub source: Option<String>,
 }
 
@@ -177,6 +183,7 @@ async fn create_flashcard(
         &NewCard {
             user_id,
             planet_id: body.planet_id,
+            lesson_id: body.lesson_id,
             correction_id: None,
             en: body.en,
             pt: body.pt,
@@ -228,6 +235,17 @@ async fn review_flashcard(
         verified_live,
     )
     .await?;
+
+    // The module gate: once every card this module produced has been reviewed
+    // at least once, the flashcard half is closed and the next module opens.
+    if let Some(lesson_id) = updated.lesson_id {
+        let (total, reviewed) =
+            repositories::modules::flashcard_counts(&state.pool, user_id, lesson_id).await?;
+        if total > 0 && reviewed >= total {
+            repositories::modules::set_flashcards_done(&state.pool, user_id, lesson_id, true)
+                .await?;
+        }
+    }
 
     if let Some(planet_id) = updated.planet_id {
         let metric =

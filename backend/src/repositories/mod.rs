@@ -10,9 +10,11 @@
 pub mod conversations;
 pub mod flashcards;
 pub mod gamification;
+pub mod modules;
 pub mod planets;
 pub mod refresh_tokens;
 pub mod stories;
+pub mod story_seeds;
 pub mod tts;
 pub mod users;
 pub mod voices;

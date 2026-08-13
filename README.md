@@ -18,6 +18,23 @@ cp .env.example .env        # set DATABASE_URL, JWT_SECRET, OPENAI_API_KEY
 cargo run                   # applies migrations on boot; serves on http://0.0.0.0:3000
 ```
 
+### Seeding the audio stories
+
+Each planet ships with one pre-written audio story, shared by everyone on the
+course — the Audio tab plays it straight away instead of generating per
+learner. They are written once, by the chat model, into `planet_story_seeds`:
+
+```bash
+cargo run --release --bin seed_stories                    # every planet still missing one
+cargo run --release --bin seed_stories -- --course pt-en  # one course (base-target)
+cargo run --release --bin seed_stories -- --limit 3       # a taste, to check the output
+cargo run --release --bin seed_stories -- --force         # rewrite the stories that exist
+```
+
+Re-runnable: seeded planets are skipped, and a planet whose model call failed
+stays unseeded so the next run retries it. Needs `OPENAI_API_KEY`; without one
+it writes the deterministic template story instead.
+
 ### Layout
 
 The server is organized in layers — HTTP stays out of business logic, and

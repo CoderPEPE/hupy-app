@@ -26,6 +26,9 @@ pub struct Card {
     /// False when the card was rated "easy" but the tutor hasn't re-tested it
     /// live yet — a self-report alone never counts as mastered.
     pub verified_live: bool,
+    /// The module whose conversation produced this card. Cards made outside a
+    /// module (free chat) have none.
+    pub lesson_id: Option<Uuid>,
 }
 
 /// Insert payload for a new card; the scheduling columns are left to their
@@ -43,4 +46,5 @@ pub struct NewCard {
     pub verb: String,
     pub complement: String,
     pub source: String,
+    pub lesson_id: Option<Uuid>,
 }

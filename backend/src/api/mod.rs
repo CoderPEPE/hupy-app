@@ -10,6 +10,7 @@ pub mod flashcards;
 pub mod gamification;
 pub mod planets;
 pub mod realtime;
+pub mod modules;
 pub mod stories;
 pub mod tts;
 pub mod voices;

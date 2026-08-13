@@ -79,22 +79,30 @@ pub fn compute_metrics(
     user_id: Uuid,
     stats: &UserStats,
 ) -> QueryResult<Metrics> {
-    // Lessons are derived, not stored: a planet's four lessons (learn ->
-    // practice -> test -> master) each unlock at a mastery threshold, so
-    // "lessons completed" is a function of per-planet mastery.
-    let masteries: Vec<(i32, f64)> = user_planet_progress::table
-        .inner_join(planets::table.on(planets::id.eq(user_planet_progress::planet_id)))
-        .filter(user_planet_progress::user_id.eq(user_id))
-        .select((planets::number, user_planet_progress::mastery))
+    // Modules a learner has actually finished — conversation and flashcards
+    // both — rather than a reading of the mastery average.
+    let module_rows: Vec<(i32, i64)> = crate::schema::user_module_progress::table
+        .inner_join(
+            crate::schema::planet_lessons::table
+                .on(crate::schema::planet_lessons::id
+                    .eq(crate::schema::user_module_progress::lesson_id)),
+        )
+        .inner_join(
+            planets::table.on(planets::id.eq(crate::schema::planet_lessons::planet_id)),
+        )
+        .filter(crate::schema::user_module_progress::user_id.eq(user_id))
+        .filter(crate::schema::user_module_progress::conversation_done.eq(true))
+        .filter(crate::schema::user_module_progress::flashcards_done.eq(true))
+        .group_by(planets::number)
+        .select((planets::number, diesel::dsl::count_star()))
         .load(conn)?;
 
     let mut planet_lessons: HashMap<i32, i64> = HashMap::new();
-    for (number, mastery) in &masteries {
-        let done = crate::services::planets::lessons_completed_count(*mastery);
+    for (number, done) in &module_rows {
         // A learner has one course, but the same planet number exists once per
         // course; keep the best row so switching courses never regresses.
         let entry = planet_lessons.entry(*number).or_insert(0);
-        *entry = (*entry).max(done);
+        *entry = (*entry).max(*done);
     }
     let lessons_completed = planet_lessons.values().sum();
 

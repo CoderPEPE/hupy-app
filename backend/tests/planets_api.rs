@@ -75,11 +75,11 @@ async fn detail_returns_sentences_and_lesson_path() {
         detail["sentences"].as_array().unwrap().len() >= 40,
         "{detail}"
     );
-    // The spec's standard 10-block path, with per-user completion derived
-    // from mastery: block 1 starts unlocked, the rest locked behind it.
+    // The ten-module path: the learner is on module 1, everything after it is
+    // locked behind the conversation + flashcards gate.
     assert_eq!(detail["lessons"].as_array().unwrap().len(), 10);
     assert_eq!(detail["lessons"][0]["kind"], "context");
-    assert_eq!(detail["lessons"][0]["state"], "available");
+    assert_eq!(detail["lessons"][0]["state"], "current");
     assert_eq!(detail["lessons"][1]["state"], "locked");
     // Every block names the skill its review would drill.
     assert_eq!(detail["lessons"][4]["skill"], "listening");
@@ -302,8 +302,9 @@ async fn completing_planet_one_unlocks_planet_two() {
     .await;
     assert_eq!(status.as_u16(), 200);
 
-    // All six metrics are now >= 0.8 (mastery ~0.87) and no essential skill
-    // is under the floor -> planet 1 is conquered, so planet 2 opens.
+    // Every metric is now >= 0.8 (mastery ~0.87) — and that is deliberately
+    // NOT enough any more. The planet is earned by working through its ten
+    // modules, so planet 2 stays shut.
     let (status, body) = request(
         &app,
         "GET",
@@ -311,6 +312,45 @@ async fn completing_planet_one_unlocks_planet_two() {
         Some(&token),
         None,
         "10.0.35.8",
+    )
+    .await;
+    assert_eq!(status.as_u16(), 200, "{body}");
+    assert_eq!(
+        body["status"], "locked",
+        "a high mastery average must not open the next planet: {body}"
+    );
+
+    // Work through planet 1's ten modules — the real gate.
+    let (_, detail) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{p1}"),
+        Some(&token),
+        None,
+        "10.0.35.9",
+    )
+    .await;
+    for module in detail["lessons"].as_array().unwrap() {
+        let id = module["id"].as_str().unwrap();
+        let (status, body) = request(
+            &app,
+            "POST",
+            &format!("/api/modules/{id}/complete-conversation"),
+            Some(&token),
+            None,
+            "10.0.35.10",
+        )
+        .await;
+        assert_eq!(status.as_u16(), 200, "{body}");
+    }
+
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{p2}"),
+        Some(&token),
+        None,
+        "10.0.35.11",
     )
     .await;
     assert_eq!(status.as_u16(), 200, "{body}");

@@ -1,154 +1,43 @@
 import {
-  ChevronLeft,
+  Bell,
+  Check,
   ChevronRight,
   Clock,
-  Headphones,
+  FileText,
+  Gauge,
+  Info,
+  Languages,
   Loader2,
   Lock,
   Pause,
   Play,
   RotateCcw,
   RotateCw,
+  SkipBack,
+  SkipForward,
   Sparkles,
-  Square,
 } from 'lucide-react-native';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useGenerateStory, useSaveStoryProgress, useStories } from '../api/hooks';
+import React, { useEffect, useRef, useState } from 'react';
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { usePlanets, useSaveStoryProgress, useStories } from '../api/hooks';
 import { AppTabBar } from '../components/AppTabBar';
-import { PlanetTile } from '../components/PlanetTile';
-import { GradientBar } from '../components/GradientBar';
-import { Card, ScreenHeader } from '../components/ui';
+import { PlanetOrb } from '../components/PlanetOrb';
+import { Card, Dropdown, ScreenHeader } from '../components/ui';
 import { plural, useT } from '../i18n';
 import { useAuthStore } from '../store/auth';
+import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing, typography } from '../theme';
 import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
-import type { PlanetStory, StoryListEntry } from '../types';
+import { formatTime, indexForElapsed, unitSecs, unitStart } from '../voice/storyTiming';
+import type { Planet, StoryListEntry } from '../types';
 
-/** Words per second used to estimate each unit's duration (≈150 wpm). */
-const WPS = 2.5;
 const SPEEDS = [0.75, 1, 1.25, 1.5] as const;
 
-function unitSecs(text: string): number {
-  const words = text.trim().split(/\s+/).filter(Boolean).length;
-  return Math.max(1, Math.ceil(words / WPS));
-}
-
-function formatTime(secs: number): string {
-  const s = Math.max(0, Math.floor(secs));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${r.toString().padStart(2, '0')}`;
-}
-
-/** Maps an elapsed-time target (seconds) to the unit index it falls in. */
-function indexForElapsed(units: string[], elapsed: number): number {
-  let acc = 0;
-  for (let i = 0; i < units.length; i++) {
-    const d = unitSecs(units[i]);
-    if (elapsed < acc + d) return i;
-    acc += d;
-  }
-  return Math.max(0, units.length - 1);
-}
-
 // ---------------------------------------------------------------------------
-// Library row
+// Player — the hero card plus its action tiles
 // ---------------------------------------------------------------------------
 
-function StoryRow({
-  entry,
-  active,
-  onOpen,
-}: {
-  entry: StoryListEntry;
-  active: boolean;
-  onOpen: () => void;
-}) {
-  const t = useT();
-  const { planet, unlocked, story } = entry;
-  const generate = useGenerateStory();
-  const [generating, setGenerating] = useState(false);
-
-  const doGenerate = () => {
-    setGenerating(true);
-    generate.mutate(planet.id, { onSettled: () => setGenerating(false) });
-  };
-
-  const duration = story?.duration_secs ?? 0;
-  const position = story?.position_secs ?? 0;
-  const resumed = story && position > 0 && !story.completed;
-  // The AI is still writing this one — the list polls until it turns 'ready'.
-  const writing = story?.status === 'generating';
-  const playable = !!story && !writing;
-
-  return (
-    <Card row style={[styles.storyCard, !unlocked && styles.storyCardLocked, active && styles.storyCardActive]} onPress={playable ? onOpen : undefined} disabled={!playable}>
-      <PlanetTile planetNumber={planet.number} color={planet.color} size={48} locked={!unlocked} />
-      <View style={{ flex: 1, marginLeft: spacing.sm }}>
-        <Text style={[styles.storyPlanetTag, { color: unlocked ? planet.color : colors.textFaint }]}>
-          {t('planets.planetTag', { number: planet.number })} · {planet.level}
-        </Text>
-        <Text style={[styles.storyTitle, !unlocked && styles.storyTitleLocked]} numberOfLines={1}>
-          {planet.title}
-        </Text>
-        {!unlocked ? (
-          <Text style={styles.storyMeta}>{t('audio.lockedHint')}</Text>
-        ) : writing ? (
-          <View style={styles.storyMetaRow}>
-            <Sparkles size={11} color={colors.primary} />
-            <Text style={styles.storyMeta}>{t('audio.writing')}</Text>
-          </View>
-        ) : story ? (
-          <View style={styles.storyMetaRow}>
-            <Clock size={11} color={colors.textMuted} />
-            <Text style={styles.storyMeta}>
-              {t(plural(Math.max(1, Math.round(duration / 60)), 'audio.minOne', 'audio.minOther'), {
-                count: Math.max(1, Math.round(duration / 60)),
-              })}{' '}
-              · {resumed ? t('audio.resumed') : t('audio.ready')}
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.storyMetaRow}>
-            <Sparkles size={11} color={colors.primary} />
-            <Text style={styles.storyMeta}>{t('audio.awaitingGeneration')}</Text>
-          </View>
-        )}
-      </View>
-
-      {writing ? (
-        <Loader2 size={18} color={colors.primary} />
-      ) : unlocked && !story ? (
-        <Pressable
-          style={styles.generateBtn}
-          onPress={(e) => {
-            // Nested inside the Card's onPress — don't also open the player.
-            e.stopPropagation();
-            doGenerate();
-          }}
-          disabled={generating}
-          hitSlop={6}
-        >
-          {generating ? <Loader2 size={15} color={colors.textOnPrimary} /> : <Sparkles size={15} color={colors.textOnPrimary} />}
-          <Text style={styles.generateText}>{generating ? t('audio.generating') : t('audio.generate')}</Text>
-        </Pressable>
-      ) : unlocked ? (
-        <View style={styles.playBadge}>
-          {resumed ? <RotateCcw size={16} color={colors.textOnPrimary} /> : <Play size={16} color={colors.textOnPrimary} fill={colors.textOnPrimary} />}
-        </View>
-      ) : (
-        <Lock size={16} color={colors.textFaint} />
-      )}
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Player
-// ---------------------------------------------------------------------------
-
-function StoryPlayer({ entry, onClose }: { entry: StoryListEntry; onClose: () => void }) {
+function StoryPanel({ entry, planet }: { entry: StoryListEntry; planet: Planet | undefined }) {
   const t = useT();
   const user = useAuthStore((s) => s.user);
   const saveProgress = useSaveStoryProgress();
@@ -163,6 +52,7 @@ function StoryPlayer({ entry, onClose }: { entry: StoryListEntry; onClose: () =>
   const [playing, setPlaying] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [speed, setSpeed] = useState<(typeof SPEEDS)[number]>(1);
+  const [showTranscript, setShowTranscript] = useState(false);
   const [showTranslation, setShowTranslation] = useState(false);
 
   const indexRef = useRef(0);
@@ -248,93 +138,205 @@ function StoryPlayer({ entry, onClose }: { entry: StoryListEntry; onClose: () =>
     else play();
   };
 
-  const changeSpeed = (s: (typeof SPEEDS)[number]) => {
-    speedRef.current = s;
-    setSpeed(s);
+  /** Speed is one tile, not a row of chips — each tap steps to the next rate
+   * and the tile shows where you landed. */
+  const cycleSpeed = () => {
+    const next = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
+    speedRef.current = next;
+    setSpeed(next);
   };
+
+  const blocksDone = planet?.completed_blocks ?? 0;
+  const blocksTotal = planet?.total_blocks ?? 10;
+  const minutes = Math.max(1, Math.round(totalSecs / 60));
+  const pct = totalSecs ? Math.max(0, Math.min(1, elapsed / totalSecs)) * 100 : 0;
 
   const current = units[index] ?? '';
   const currentTranslation = translation[index] ?? '';
 
-  if (!story) return null;
-
   return (
-    <Card style={styles.playerCard}>
-      <View style={styles.playerHeader}>
-        <Pressable onPress={onClose} hitSlop={8} accessibilityLabel={t('common.back')}>
-          <ChevronLeft size={20} color={colors.text} />
-        </Pressable>
-        <View style={{ flex: 1, alignItems: 'center' }}>
-          <Text style={styles.playerEyebrow}>
-            {t('planets.planetTag', { number: entry.planet.number })} · {entry.planet.level}
-          </Text>
-          <Text style={styles.playerTitle} numberOfLines={1}>
-            {story.title}
-          </Text>
+    <>
+      <Card style={styles.hero}>
+        <View style={styles.heroTop}>
+          <View style={styles.heroCopy}>
+            {entry.unlocked ? (
+              <View style={styles.badge}>
+                <View style={styles.badgeCheck}>
+                  <Check size={11} color={colors.textOnPrimary} strokeWidth={3} />
+                </View>
+                <Text style={styles.badgeText}>
+                  {t('audio.blocksDone', { done: blocksDone, total: blocksTotal })}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.badge}>
+                <Lock size={12} color={colors.primary} />
+                <Text style={styles.badgeText}>{t('audio.lockedHint')}</Text>
+              </View>
+            )}
+
+            <Text style={styles.heroTitle}>{story?.title ?? entry.planet.title}</Text>
+            <Text style={styles.heroBody}>{t('audio.heroBody', { count: blocksTotal })}</Text>
+
+            <View style={styles.aiChip}>
+              <Sparkles size={13} color={colors.primary} />
+              <Text style={styles.aiChipText}>{t('audio.aiGenerated')}</Text>
+            </View>
+          </View>
+
+          <Image
+            source={require('../../assets/brand/mascot-astronaut.png')}
+            style={styles.heroArt}
+            resizeMode="contain"
+          />
         </View>
-        <Headphones size={20} color={colors.primary} />
-      </View>
 
-      {/* Progress */}
-      <View style={styles.progressBlock}>
-        <GradientBar value={totalSecs ? elapsed / totalSecs : 0} colors={[colors.primary, '#5BB4A4']} height={8} />
-        <View style={styles.timeRow}>
-          <Text style={styles.timeText}>{formatTime(elapsed)}</Text>
-          <Text style={styles.timeText}>{formatTime(totalSecs)}</Text>
-        </View>
-      </View>
+        {story && (
+          <View style={styles.durationRow}>
+            <Clock size={15} color={colors.textMuted} />
+            <Text style={styles.durationText}>
+              {t(plural(minutes, 'audio.minOne', 'audio.minOther'), { count: minutes })}
+            </Text>
+          </View>
+        )}
 
-      {/* Transcript */}
-      <View style={styles.transcriptCard}>
-        <Text style={styles.transcriptUnit} numberOfLines={3}>
-          {current}
-        </Text>
-        {showTranslation && currentTranslation ? (
-          <Text style={styles.transcriptTranslation}>{currentTranslation}</Text>
-        ) : null}
-      </View>
+        <View style={styles.divider} />
 
-      {/* Transport controls — big, easy to reach while driving */}
-      <View style={styles.controlsRow}>
-        <Pressable style={styles.skipBtn} onPress={() => seekTo(elapsedRef.current - 15)} hitSlop={6}>
-          <RotateCcw size={20} color={colors.text} />
-          <Text style={styles.skipLabel}>15</Text>
-        </Pressable>
-        <Pressable style={[styles.playBig, playing && styles.playBigActive]} onPress={togglePlay} hitSlop={6}>
-          {playing ? (
-            <Square size={26} color={colors.textOnPrimary} fill={colors.textOnPrimary} />
-          ) : (
-            <Play size={28} color={colors.textOnPrimary} fill={colors.textOnPrimary} style={{ marginLeft: 3 }} />
+        {/* Stories ship pre-written with the course, so below the rule there
+            is either the transport or the reason there is nothing to play. */}
+        {!story ? (
+          <View style={styles.centerState}>
+            <Text style={styles.centerText}>
+              {entry.unlocked ? t('audio.notSeeded') : t('audio.lockedBody')}
+            </Text>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.resumeLabel}>
+              {elapsed > 0 ? t('audio.resumeLabel') : t('audio.startLabel')}
+            </Text>
+
+            <View style={styles.track}>
+              <View style={[styles.trackFill, { width: `${pct}%` }]} />
+              <View style={[styles.trackThumb, { left: `${pct}%` }]} />
+            </View>
+            <View style={styles.timeRow}>
+              <Text style={styles.timeText}>{formatTime(elapsed)}</Text>
+              <Text style={styles.timeText}>{formatTime(totalSecs)}</Text>
+            </View>
+
+            <View style={styles.controls}>
+              <TransportButton
+                label={t('audio.prevSentence')}
+                onPress={() => seekTo(unitStart(units, Math.max(0, index - 1)))}
+              >
+                <SkipBack size={26} color={colors.brand.purpleDeep} fill={colors.brand.purpleDeep} />
+              </TransportButton>
+
+              <TransportButton label={t('audio.back15')} onPress={() => seekTo(elapsedRef.current - 15)}>
+                <RotateCcw size={28} color={colors.brand.purpleDeep} />
+                <Text style={styles.skipLabel}>15</Text>
+              </TransportButton>
+
+              <Pressable
+                style={styles.playBig}
+                onPress={togglePlay}
+                hitSlop={6}
+                accessibilityRole="button"
+                accessibilityLabel={playing ? t('audio.pause') : t('audio.play')}
+              >
+                {playing ? (
+                  <Pause size={30} color={colors.textOnPrimary} fill={colors.textOnPrimary} />
+                ) : (
+                  <Play size={30} color={colors.textOnPrimary} fill={colors.textOnPrimary} style={{ marginLeft: 3 }} />
+                )}
+              </Pressable>
+
+              <TransportButton label={t('audio.forward15')} onPress={() => seekTo(elapsedRef.current + 15)}>
+                <RotateCw size={28} color={colors.brand.purpleDeep} />
+                <Text style={styles.skipLabel}>15</Text>
+              </TransportButton>
+
+              <TransportButton
+                label={t('audio.nextSentence')}
+                onPress={() => seekTo(unitStart(units, Math.min(units.length - 1, index + 1)))}
+              >
+                <SkipForward size={26} color={colors.brand.purpleDeep} fill={colors.brand.purpleDeep} />
+              </TransportButton>
+            </View>
+          </>
+        )}
+      </Card>
+
+      {story && (
+        <>
+          <View style={styles.tileRow}>
+            <ActionTile icon={<Gauge size={24} color={colors.primary} />} label={t('audio.speed')} value={`${speed}x`} onPress={cycleSpeed} />
+            <ActionTile
+              icon={<FileText size={24} color={colors.primary} />}
+              label={t('audio.transcript')}
+              active={showTranscript}
+              onPress={() => setShowTranscript((v) => !v)}
+            />
+            <ActionTile
+              icon={<Languages size={24} color={colors.primary} />}
+              label={t('audio.translation')}
+              active={showTranslation}
+              onPress={() => setShowTranslation((v) => !v)}
+            />
+          </View>
+
+          {(showTranscript || showTranslation) && (
+            <Card style={styles.transcriptCard}>
+              {showTranscript && <Text style={styles.transcriptUnit}>{current}</Text>}
+              {showTranslation && currentTranslation ? (
+                <Text style={styles.transcriptTranslation}>{currentTranslation}</Text>
+              ) : null}
+            </Card>
           )}
-        </Pressable>
-        <Pressable style={styles.skipBtn} onPress={() => seekTo(elapsedRef.current + 15)} hitSlop={6}>
-          <RotateCw size={20} color={colors.text} />
-          <Text style={styles.skipLabel}>15</Text>
-        </Pressable>
-      </View>
+        </>
+      )}
+    </>
+  );
+}
 
-      {/* Speed + translation toggles */}
-      <View style={styles.toggleRow}>
-        <View style={styles.speedGroup}>
-          {SPEEDS.map((s) => (
-            <Pressable
-              key={s}
-              onPress={() => changeSpeed(s)}
-              style={[styles.speedChip, speed === s && styles.speedChipActive]}
-            >
-              <Text style={[styles.speedText, speed === s && styles.speedTextActive]}>{s}×</Text>
-            </Pressable>
-          ))}
-        </View>
-        <Pressable
-          onPress={() => setShowTranslation((v) => !v)}
-          style={[styles.translationToggle, showTranslation && styles.translationToggleActive]}
-        >
-          <Text style={[styles.translationToggleText, showTranslation && styles.translationToggleTextActive]}>
-            {t('audio.translation')}
-          </Text>
-        </Pressable>
-      </View>
+function TransportButton({
+  label,
+  onPress,
+  children,
+}: {
+  label: string;
+  onPress: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <Pressable style={styles.transport} onPress={onPress} hitSlop={6} accessibilityRole="button" accessibilityLabel={label}>
+      <View style={styles.transportIcon}>{children}</View>
+      <Text style={styles.transportLabel} numberOfLines={2}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ActionTile({
+  icon,
+  label,
+  value,
+  active,
+  onPress,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value?: string;
+  active?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Card style={[styles.tile, active && styles.tileActive]} onPress={onPress}>
+      {icon}
+      <Text style={styles.tileLabel}>{label}</Text>
+      {value ? <Text style={styles.tileValue}>{value}</Text> : null}
     </Card>
   );
 }
@@ -345,26 +347,36 @@ function StoryPlayer({ entry, onClose }: { entry: StoryListEntry; onClose: () =>
 
 export function AudioScreen() {
   const t = useT();
+  const setTab = useUiStore((s) => s.setTab);
   const { data: entries = [], isLoading } = useStories();
+  const { data: planets = [] } = usePlanets();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const selected = entries.find((e) => e.planet.id === selectedId) ?? null;
-  const generated = entries.filter((e) => e.story && e.story.status !== 'generating').length;
-
-  const unlockCount = useMemo(() => {
-    const generatedIds = new Set(entries.filter((e) => e.story).map((e) => e.planet.id));
-    return entries.filter((e) => e.unlocked && !generatedIds.has(e.planet.id)).length;
-  }, [entries]);
+  // Default to the first planet that actually has a story to play, so the
+  // screen opens on something audible rather than on Planet 1's empty state.
+  const selected =
+    entries.find((e) => e.planet.id === selectedId) ?? entries.find((e) => e.story) ?? entries[0] ?? null;
+  const planet = planets.find((p) => p.id === selected?.planet.id);
+  const next = selected ? entries[entries.findIndex((e) => e.planet.id === selected.planet.id) + 1] : undefined;
 
   return (
     <View style={styles.screen}>
       <ScreenHeader
         title={t('audio.title')}
-        subtitle={t('audio.subtitle', { count: generated })}
+        centerTitle
         left={
-          <View style={styles.headerIcon}>
-            <Headphones size={22} color={colors.primary} />
-          </View>
+          <Image source={require('../../assets/brand/logo-wordmark.png')} style={styles.logo} resizeMode="contain" />
+        }
+        right={
+          <Pressable
+            style={styles.bell}
+            onPress={() => setTab('profile')}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={t('home.profile')}
+          >
+            <Bell size={20} color={colors.text} />
+          </Pressable>
         }
       />
 
@@ -374,18 +386,51 @@ export function AudioScreen() {
             <Loader2 size={26} color={colors.textFaint} />
             <Text style={styles.centerText}>{t('audio.loading')}</Text>
           </View>
+        ) : !selected ? (
+          <Text style={styles.footerNote}>{t('audio.footerNote')}</Text>
         ) : (
           <>
-            {selected && selected.story && selected.story.status !== 'generating' && (
-              <StoryPlayer entry={selected} onClose={() => setSelectedId(null)} />
-            )}
+            <Dropdown
+              value={selected.planet.id}
+              onChange={setSelectedId}
+              options={entries.map((e) => ({
+                value: e.planet.id,
+                label: t('planets.planetTag', { number: e.planet.number }),
+                icon: '🪐',
+              }))}
+            />
 
-            {unlockCount > 0 && (
-              <Text style={styles.sectionLabel}>{t('audio.readyToGenerate')}</Text>
+            <StoryPanel key={selected.planet.id} entry={selected} planet={planet} />
+
+            <Card row style={styles.infoCard}>
+              <View style={styles.infoIcon}>
+                <Info size={18} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.infoTitle}>{t('audio.howItWorks')}</Text>
+                <Text style={styles.infoBody}>{t('audio.howItWorksBody')}</Text>
+              </View>
+            </Card>
+
+            {next && (
+              <Card row style={styles.nextCard} onPress={() => setSelectedId(next.planet.id)}>
+                <View>
+                  <PlanetOrb planetNumber={next.planet.number} color={next.planet.color} size={56} />
+                  {!next.unlocked && (
+                    <View style={styles.nextLock}>
+                      <Lock size={12} color={colors.primary} />
+                    </View>
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.nextTitle}>{t('planets.planetTag', { number: next.planet.number })}</Text>
+                  <Text style={styles.nextBody}>
+                    {next.unlocked ? t('audio.nextReadyBody') : t('audio.nextLockedBody', { count: planet?.total_blocks ?? 10 })}
+                  </Text>
+                </View>
+                <ChevronRight size={20} color={colors.textFaint} />
+              </Card>
             )}
-            {entries.map((entry) => (
-              <StoryRow key={entry.planet.id} entry={entry} active={selectedId === entry.planet.id} onOpen={() => setSelectedId(entry.planet.id)} />
-            ))}
 
             <Text style={styles.footerNote}>{t('audio.footerNote')}</Text>
           </>
@@ -400,20 +445,26 @@ export function AudioScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.authBackground,
   },
-  headerIcon: {
+  logo: {
+    width: 96,
+    height: 28,
+  },
+  bell: {
     width: 44,
     height: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.primarySoft,
+    borderRadius: radius.round,
+    backgroundColor: colors.card,
     alignItems: 'center',
     justifyContent: 'center',
+    ...shadows.card,
   },
   list: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
     paddingBottom: spacing.xl,
+    gap: spacing.md,
   },
   centerState: {
     alignItems: 'center',
@@ -425,214 +476,259 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textMuted,
   },
-  sectionLabel: {
-    ...typography.eyebrow,
-    fontSize: 11,
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    marginBottom: spacing.sm,
-    marginTop: spacing.sm,
-  },
-  storyCard: {
-    marginBottom: spacing.sm,
-    padding: spacing.sm,
-  },
-  storyCardLocked: {
-    opacity: 0.75,
-  },
-  storyCardActive: {
-    borderColor: colors.primary,
-    borderWidth: 1.5,
-  },
-  storyPlanetTag: {
-    ...typography.eyebrow,
-    fontSize: 9,
-    textTransform: 'uppercase',
-  },
-  storyTitle: {
-    ...typography.section,
-    color: colors.text,
-    marginTop: 1,
-  },
-  storyTitleLocked: {
-    color: colors.textFaint,
-  },
-  storyMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  storyMeta: {
-    ...typography.caption,
-    color: colors.textMuted,
-  },
-  generateBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: colors.primary,
-    borderRadius: radius.round,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginLeft: spacing.sm,
-  },
-  generateText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: colors.textOnPrimary,
-  },
-  playBadge: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: spacing.sm,
-    ...shadows.button,
-  },
   footerNote: {
     ...typography.caption,
     textAlign: 'center',
     color: colors.textFaint,
-    marginTop: spacing.lg,
+    marginTop: spacing.sm,
     paddingHorizontal: spacing.md,
   },
-  playerCard: {
+
+  // --- Hero -----------------------------------------------------------------
+  hero: {
     padding: spacing.md,
-    marginBottom: spacing.lg,
-    borderColor: colors.primary,
-    borderWidth: 1,
   },
-  playerHeader: {
+  heroTop: {
+    flexDirection: 'row',
+  },
+  heroCopy: {
+    flex: 1,
+  },
+  heroArt: {
+    width: 116,
+    height: 116,
+    alignSelf: 'center',
+  },
+  badge: {
     flexDirection: 'row',
     alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: radius.round,
+    borderWidth: 1,
+    borderColor: colors.primarySoft,
+    backgroundColor: colors.background,
   },
-  playerEyebrow: {
-    ...typography.eyebrow,
-    fontSize: 9,
-    color: colors.primary,
+  badgeCheck: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  playerTitle: {
-    ...typography.section,
-    fontSize: 15,
-    color: colors.text,
-    marginTop: 1,
+  badgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.brand.purpleDeep,
   },
-  progressBlock: {
+  heroTitle: {
+    ...typography.display,
+    color: colors.brand.purpleDeep,
     marginTop: spacing.md,
+  },
+  heroBody: {
+    ...typography.body,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
+  },
+  aiChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: spacing.md,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: radius.round,
+    backgroundColor: colors.primarySoft,
+  },
+  aiChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.brand.purpleDeep,
+  },
+  durationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.md,
+  },
+  durationText: {
+    ...typography.body,
+    color: colors.textMuted,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: spacing.md,
+  },
+
+  // --- Transport ------------------------------------------------------------
+  resumeLabel: {
+    ...typography.cardTitle,
+    color: colors.brand.purpleDeep,
+    marginBottom: spacing.sm,
+  },
+  track: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primarySoft,
+    justifyContent: 'center',
+  },
+  trackFill: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primary,
+  },
+  trackThumb: {
+    position: 'absolute',
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    marginLeft: -7,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.background,
   },
   timeRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 4,
+    marginTop: 6,
   },
   timeText: {
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
     color: colors.textMuted,
   },
-  transcriptCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginTop: spacing.md,
-    minHeight: 76,
-  },
-  transcriptUnit: {
-    ...typography.body,
-    fontSize: 16,
-    lineHeight: 22,
-    color: colors.text,
-    textAlign: 'center',
-  },
-  transcriptTranslation: {
-    ...typography.body,
-    fontSize: 14,
-    color: colors.primary,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-  },
-  controlsRow: {
+  controls: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xl,
+    justifyContent: 'space-between',
     marginTop: spacing.lg,
   },
-  skipBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: colors.primarySoft,
+  transport: {
+    // Shares whatever the big play button leaves, so five controls still fit
+    // on a narrow phone instead of overflowing the card.
+    flex: 1,
+    alignItems: 'center',
+  },
+  transportIcon: {
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
   skipLabel: {
     position: 'absolute',
-    fontSize: 8,
+    fontSize: 10,
     fontWeight: '800',
-    color: colors.primary,
-    bottom: 9,
+    color: colors.brand.purpleDeep,
+  },
+  transportLabel: {
+    fontSize: 10,
+    lineHeight: 13,
+    textAlign: 'center',
+    color: colors.textMuted,
   },
   playBig: {
-    width: 74,
-    height: 74,
-    borderRadius: 37,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    ...shadows.button,
+    ...shadows.card,
   },
-  playBigActive: {
-    backgroundColor: colors.primaryPressed,
-  },
-  toggleRow: {
+
+  // --- Action tiles ---------------------------------------------------------
+  tileRow: {
     flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  tile: {
+    flex: 1,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: 4,
   },
-  speedGroup: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  speedChip: {
-    borderRadius: radius.round,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: colors.surface,
-  },
-  speedChipActive: {
-    backgroundColor: colors.primary,
-  },
-  speedText: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: colors.textMuted,
-  },
-  speedTextActive: {
-    color: colors.textOnPrimary,
-  },
-  translationToggle: {
-    borderRadius: radius.round,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  translationToggleActive: {
-    backgroundColor: colors.primarySoft,
+  tileActive: {
+    borderWidth: 1.5,
     borderColor: colors.primary,
   },
-  translationToggleText: {
+  tileLabel: {
+    marginTop: spacing.sm,
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.brand.purpleDeep,
+    textAlign: 'center',
+  },
+  tileValue: {
     fontSize: 12,
     fontWeight: '700',
     color: colors.textMuted,
   },
-  translationToggleTextActive: {
+  transcriptCard: {
+    padding: spacing.md,
+  },
+  transcriptUnit: {
+    ...typography.body,
+    fontSize: 16,
+    lineHeight: 23,
+    color: colors.text,
+  },
+  transcriptTranslation: {
+    ...typography.body,
+    fontSize: 14,
     color: colors.primary,
+    marginTop: spacing.sm,
+  },
+
+  // --- Info + next planet ---------------------------------------------------
+  infoCard: {
+    padding: spacing.md,
+    alignItems: 'flex-start',
+  },
+  infoIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoTitle: {
+    ...typography.cardTitle,
+    color: colors.text,
+  },
+  infoBody: {
+    ...typography.body,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  nextCard: {
+    padding: spacing.md,
+    backgroundColor: colors.brand.purpleWash,
+  },
+  nextLock: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  nextTitle: {
+    ...typography.section,
+    color: colors.brand.purpleDeep,
+  },
+  nextBody: {
+    ...typography.body,
+    color: colors.textMuted,
+    marginTop: 2,
   },
 });

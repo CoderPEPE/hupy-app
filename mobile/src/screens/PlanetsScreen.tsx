@@ -397,9 +397,9 @@ function LessonRow({
   const state = lesson.state;
   const locked = state === 'locked';
   const done = isBlockDone(state);
-  // "Revisar" reads as a call to action, not as a failure: the block is done,
-  // it just wants another pass.
-  const needsReview = state === 'review';
+  // The conversation is behind them and only the module's cards are left —
+  // a call to action, not a failure.
+  const needsReview = state === 'flashcards_pending';
   const circleColor = needsReview ? GOLD : done ? '#27AE60' : SPACE_ACCENT;
 
   return (
@@ -757,9 +757,9 @@ export function PlanetsScreen() {
   const lessons = detail?.lessons ?? [];
   const nextLesson = nextBlock(lessons);
   const allDone = lessons.length > 0 && lessons.every((l) => isBlockDone(l.state));
-  // A conquered planet with a decayed skill sends the learner to that block
-  // rather than to the end of the path.
-  const reviewBlock = lessons.find((l) => l.state === 'review') ?? null;
+  // A module waiting on its flashcards is where the learner must go next —
+  // the path does not open past it.
+  const reviewBlock = lessons.find((l) => l.state === 'flashcards_pending') ?? null;
   const locked = planet?.status === 'locked';
 
   const stars = useMemo(() => starsFor(7, 46), []);

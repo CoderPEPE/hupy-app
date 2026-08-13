@@ -1,10 +1,27 @@
-//! Story API integration tests: the story library, the completion-gated
-//! generation, the personalized transcript, and playback-position saving.
+//! Story API integration tests: the story library, the completion gate on the
+//! pre-generated story, and playback-position saving.
 
 mod common;
 
-use common::{app, register, request, unique_email};
+use common::{app, pool, register, request, unique_email};
+use diesel::connection::SimpleConnection;
 use serde_json::json;
+
+/// Writes the pre-generated story a planet would ship with. In production
+/// this row comes from the `seed_stories` binary; the tests plant their own
+/// so they never depend on a model call.
+fn seed_story(planet_id: &str) {
+    let mut conn = pool().get().expect("test db connection");
+    conn.batch_execute(&format!(
+        "INSERT INTO planet_story_seeds \
+           (planet_id, title, sentences, translation, duration_secs, source) \
+         VALUES ('{planet_id}', 'A Day on Mercury', \
+           '[\"I wake up early.\",\"I go to work.\",\"I am happy.\"]', \
+           '[\"Acordo cedo.\",\"Vou trabalhar.\",\"Estou feliz.\"]', 42, 'test') \
+         ON CONFLICT (planet_id) DO UPDATE SET title = EXCLUDED.title"
+    ))
+    .expect("seed story");
+}
 
 #[tokio::test]
 async fn story_library_starts_locked_and_empty() {
@@ -26,35 +43,43 @@ async fn story_library_starts_locked_and_empty() {
     assert_eq!(list[59]["planet"]["level"], "C1");
 }
 
+/// The story is the reward for finishing the planet: seeded or not, a planet
+/// that has not been conquered hands over nothing.
 #[tokio::test]
-async fn story_generation_requires_a_conquered_planet() {
+async fn a_locked_planet_withholds_its_seeded_story() {
     let app = app(30, 120);
     let token = register(&app, &unique_email("story-gate")).await;
     let (_, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.42.1").await;
     let p1 = planets[0]["id"].as_str().unwrap().to_string();
+    seed_story(&p1);
 
-    // A fresh account has not conquered anything yet.
-    let (status, body) = request(
-        &app,
-        "POST",
-        &format!("/api/stories/{p1}/generate"),
-        Some(&token),
-        None,
-        "10.0.42.2",
-    )
-    .await;
-    assert_eq!(status.as_u16(), 409, "{body}");
+    let (status, body) =
+        request(&app, "GET", "/api/stories", Some(&token), None, "10.0.42.2").await;
+    assert_eq!(status.as_u16(), 200, "{body}");
+    let entry = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["planet"]["id"] == p1.as_str())
+        .unwrap()
+        .clone();
+    assert!(!entry["unlocked"].as_bool().unwrap());
+    assert!(
+        entry["story"].is_null(),
+        "a locked planet must not leak its story: {entry}"
+    );
 }
 
 #[tokio::test]
-async fn conquered_planet_generates_a_personalized_story() {
+async fn a_conquered_planet_plays_its_seeded_story() {
     let app = app(30, 120);
-    let token = register(&app, &unique_email("story-gen")).await;
+    let token = register(&app, &unique_email("story-play")).await;
     let (_, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.43.1").await;
     let p1 = planets[0]["id"].as_str().unwrap().to_string();
+    seed_story(&p1);
 
     // Conquer planet 1: max every tutor-graded metric, master every sentence
-    // and graduate one card (same honest path the unlock test uses).
+    // and graduate one card (the same honest path the unlock test uses).
     for metric in ["pronunciation", "conversation", "listening", "review"] {
         for _ in 0..6 {
             request(
@@ -88,13 +113,7 @@ async fn conquered_planet_generates_a_personalized_story() {
             "10.0.43.4",
         )
         .await;
-        assert_eq!(
-            status.as_u16(),
-            200,
-            "master {} status={} body={body}",
-            s["id"],
-            status.as_u16()
-        );
+        assert_eq!(status.as_u16(), 200, "master {} body={body}", s["id"]);
     }
     let (_, card) = request(
         &app,
@@ -126,14 +145,14 @@ async fn conquered_planet_generates_a_personalized_story() {
     .await;
     assert_eq!(status.as_u16(), 200, "{confirm}");
 
-    // Sanity: the planet must actually be conquered before generating.
+    // Sanity: the planet must actually be conquered.
     let (_, check) = request(
         &app,
         "GET",
         &format!("/api/planets/{p1}"),
         Some(&token),
         None,
-        "10.0.43.12",
+        "10.0.43.8",
     )
     .await;
     assert!(
@@ -141,63 +160,70 @@ async fn conquered_planet_generates_a_personalized_story() {
         "planet must be conquered first: {check}"
     );
 
-    // The planet is now conquered and the story can be generated.
-    let (status, body) = request(
-        &app,
-        "POST",
-        &format!("/api/stories/{p1}/generate"),
-        Some(&token),
-        None,
-        "10.0.43.8",
-    )
-    .await;
-    assert_eq!(status.as_u16(), 200, "{body}");
-    assert!(body["sentences"].as_array().unwrap().len() >= 3, "{body}");
-    assert_eq!(
-        body["sentences"].as_array().unwrap().len(),
-        body["translation"].as_array().unwrap().len(),
-        "translation must align 1:1 with the transcript"
-    );
-    assert!(body["duration_secs"].as_i64().unwrap() > 0, "{body}");
-    assert!(body["position_secs"].as_i64().unwrap() == 0, "{body}");
-
-    // The story appears in the library for this planet, unlocked.
+    // No generation step: the seeded story is simply there, ready to play.
     let (_, list) = request(&app, "GET", "/api/stories", Some(&token), None, "10.0.43.9").await;
     let entry = list
         .as_array()
         .unwrap()
         .iter()
         .find(|e| e["planet"]["id"] == p1.as_str())
-        .unwrap();
+        .unwrap()
+        .clone();
     assert!(entry["unlocked"].as_bool().unwrap());
-    assert!(!entry["story"].is_null());
+    let story = &entry["story"];
+    assert_eq!(story["title"], "A Day on Mercury", "{entry}");
+    assert_eq!(story["status"], "ready");
+    assert_eq!(story["sentences"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        story["sentences"].as_array().unwrap().len(),
+        story["translation"].as_array().unwrap().len(),
+        "translation must align 1:1 with the transcript"
+    );
+    assert_eq!(story["duration_secs"], 42);
+    assert_eq!(story["position_secs"], 0, "nothing listened to yet");
 
-    // Playback progress is persisted and returned.
-    let (status, body) = request(
+    // Playback progress is persisted against the seed…
+    let (status, saved) = request(
         &app,
         "POST",
         &format!("/api/stories/{p1}/progress"),
         Some(&token),
-        Some(json!({ "position_secs": 45, "completed": false })),
+        Some(json!({ "position_secs": 20, "completed": false })),
         "10.0.43.10",
     )
     .await;
-    assert_eq!(status.as_u16(), 200, "{body}");
-    assert_eq!(body["position_secs"], 45);
+    assert_eq!(status.as_u16(), 200, "{saved}");
+    assert_eq!(saved["position_secs"], 20);
+    assert_eq!(
+        saved["sentences"].as_array().unwrap().len(),
+        3,
+        "the transcript still comes from the seed: {saved}"
+    );
 
-    // Regeneration is idempotent (upsert, not a second row).
-    let (status, body2) = request(
+    // …and comes back on the next read, so the player resumes.
+    let (status, again) = request(
         &app,
-        "POST",
-        &format!("/api/stories/{p1}/generate"),
+        "GET",
+        &format!("/api/stories/{p1}"),
         Some(&token),
         None,
         "10.0.43.11",
     )
     .await;
-    assert_eq!(status.as_u16(), 200, "{body2}");
-    assert_eq!(
-        body2["id"], body["id"],
-        "regeneration must reuse the same story row"
-    );
+    assert_eq!(status.as_u16(), 200, "{again}");
+    assert_eq!(again["position_secs"], 20);
+
+    // A second save updates the same bookmark rather than adding a row.
+    let (_, finished) = request(
+        &app,
+        "POST",
+        &format!("/api/stories/{p1}/progress"),
+        Some(&token),
+        Some(json!({ "position_secs": 42, "completed": true })),
+        "10.0.43.12",
+    )
+    .await;
+    assert_eq!(finished["position_secs"], 42);
+    assert_eq!(finished["completed"], true);
+    assert_eq!(finished["id"], story["id"], "the story identity is the seed");
 }

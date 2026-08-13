@@ -592,3 +592,115 @@ pub async fn cumulative_review_sample(
     })
     .await
 }
+
+// ---------------------------------------------------------------------------
+// Course content (no learner attached)
+// ---------------------------------------------------------------------------
+
+/// Picks the column for one language out of a sentence's three translations.
+fn for_language(language: &str, en: &str, pt: &str, es: &str) -> String {
+    match language {
+        "es" => es.to_string(),
+        "pt" => pt.to_string(),
+        _ => en.to_string(),
+    }
+}
+
+/// Every sentence taught on a planet, in course order, with no learner
+/// attached — what the pre-generated story is written from. `mastered` is
+/// always false here: the seed belongs to the course, not to a person.
+pub async fn course_sentences(
+    pool: &DbPool,
+    planet_id: Uuid,
+    base_language: &str,
+    language: &str,
+) -> Result<Vec<TutorSentence>> {
+    let (base_language, language) = (base_language.to_string(), language.to_string());
+    run_db(pool, move |conn| {
+        // All three translations come back and the pair is picked in Rust —
+        // one query instead of a select arm per course.
+        let rows: Vec<(Uuid, String, String, String, String, String, String)> =
+            planet_sentences::table
+                .filter(planet_sentences::planet_id.eq(planet_id))
+                .order(planet_sentences::position.asc())
+                .select((
+                    planet_sentences::id,
+                    planet_sentences::en,
+                    planet_sentences::pt,
+                    planet_sentences::es,
+                    planet_sentences::subject,
+                    planet_sentences::verb,
+                    planet_sentences::complement,
+                ))
+                .load(conn)?;
+        Ok(rows
+            .into_iter()
+            .map(
+                |(id, en, pt, es, subject, verb, complement)| TutorSentence {
+                    id,
+                    en: for_language(&language, &en, &pt, &es),
+                    pt: for_language(&base_language, &en, &pt, &es),
+                    subject,
+                    verb,
+                    complement,
+                    mastered: false,
+                },
+            )
+            .collect())
+    })
+    .await
+}
+
+/// Sentences from earlier planets of the same course, for the seeded story's
+/// cumulative review section. The learner-scoped twin is
+/// [`cumulative_review_sample`], which only offers what they have mastered.
+pub async fn course_review_sample(
+    pool: &DbPool,
+    before_planet_number: i32,
+    limit: i64,
+    base_language: &str,
+    language: &str,
+) -> Result<Vec<(String, String)>> {
+    let (base_language, language) = (base_language.to_string(), language.to_string());
+    run_db(pool, move |conn| {
+        let rows: Vec<(String, String, String)> = planet_sentences::table
+            .inner_join(planets::table.on(planets::id.eq(planet_sentences::planet_id)))
+            .filter(planets::number.lt(before_planet_number))
+            .filter(planets::base_language.eq(&base_language))
+            .filter(planets::language.eq(&language))
+            .order(planets::number.desc())
+            .limit(limit)
+            .select((
+                planet_sentences::en,
+                planet_sentences::pt,
+                planet_sentences::es,
+            ))
+            .load(conn)?;
+        Ok(rows
+            .into_iter()
+            .map(|(en, pt, es)| {
+                (
+                    for_language(&language, &en, &pt, &es),
+                    for_language(&base_language, &en, &pt, &es),
+                )
+            })
+            .collect())
+    })
+    .await
+}
+
+/// Every planet of every course, in course then curriculum order — the
+/// seeder's work list.
+pub async fn all_ordered(pool: &DbPool) -> Result<Vec<Planet>> {
+    run_db(pool, |conn| {
+        Ok(planets::table
+            .order((
+                planets::base_language.asc(),
+                planets::language.asc(),
+                planets::number.asc(),
+            ))
+            .select(Planet::as_select())
+            .load(conn)?)
+    })
+    .await
+}

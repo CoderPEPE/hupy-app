@@ -1,4 +1,7 @@
-use crate::schema::{lesson_steps, planet_sentences, planets, user_planet_progress};
+use crate::schema::{
+    lesson_steps, planet_lessons, planet_sentences, planets, user_module_progress,
+    user_planet_progress,
+};
 use chrono::{DateTime, Utc};
 use diesel::{Queryable, Selectable};
 use serde_json::Value;
@@ -27,6 +30,9 @@ pub struct Planet {
     pub level: String,
     /// The planet's communication goal (what the learner can do afterwards).
     pub goal: String,
+    /// The high-frequency verbs this planet is built around, e.g.
+    /// `["have","need","can"]` — the spine of its ten modules.
+    pub focus_verbs: Value,
 }
 
 /// A user's per-planet progress row. `mastery` is always the computed average
@@ -224,4 +230,41 @@ pub struct TutorSentence {
     pub verb: String,
     pub complement: String,
     pub mastered: bool,
+}
+
+/// One module of a planet: the unit the learner actually progresses through.
+/// `structures` holds the chunks the tutor may teach here, as
+/// `[{"target": "...", "base": "..."}]`.
+#[derive(Debug, Queryable, Selectable)]
+#[diesel(table_name = planet_lessons)]
+pub struct PlanetLesson {
+    pub id: Uuid,
+    pub planet_id: Uuid,
+    pub position: i32,
+    pub kind: String,
+    pub title: String,
+    pub description: String,
+    /// What this module drills: `verb:have`, `mix`, `past`, `questions`, …
+    pub focus: String,
+    pub structures: Value,
+}
+
+/// A learner's state on one module. A module counts as finished only when the
+/// conversation and its flashcards are both done — the spec's gate.
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = user_module_progress)]
+pub struct ModuleProgress {
+    pub user_id: Uuid,
+    pub lesson_id: Uuid,
+    pub conversation_done: bool,
+    pub flashcards_done: bool,
+    /// Structures the learner kept missing, replayed by later prompts.
+    pub weak_structures: Value,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl ModuleProgress {
+    pub fn completed(&self) -> bool {
+        self.conversation_done && self.flashcards_done
+    }
 }

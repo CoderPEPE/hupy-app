@@ -462,6 +462,7 @@ mod tests {
             base_language: "pt".into(),
             level: "A1".into(),
             goal: String::new(),
+            focus_verbs: serde_json::json!([]),
         }
     }
 

@@ -108,11 +108,12 @@ pub struct PlanetSummary {
 /// Assembles the state-dependent half of a summary once, so the list and
 /// detail endpoints can never drift apart on what a state means.
 fn summary_fields(
-    planet: &Planet,
     progress: &PlanetProgress,
-    prev: Option<(&PlanetProgress, f64)>,
+    completed_modules: i64,
+    prev_completed_modules: Option<i64>,
 ) -> (String, f64, Vec<String>) {
-    let (status, unlock) = services::planets::state_for(progress, planet.unlock_mastery, prev);
+    let (status, unlock) =
+        services::planets::state_for(progress, completed_modules, prev_completed_modules);
     let review_skills = services::planets::pending_review_skills(progress)
         .into_iter()
         .map(String::from)
@@ -161,7 +162,14 @@ pub struct LessonJson {
     pub steps: Vec<LessonStepJson>,
 }
 
-/// One block of the planet's ten-block path, with its per-user state.
+/// One chunk a module teaches: the target-language phrase and its translation.
+#[derive(Serialize)]
+pub struct StructureJson {
+    pub target: String,
+    pub base: String,
+}
+
+/// One module of the planet's ten-module path, with its per-user state.
 #[derive(Serialize)]
 pub struct PlanetLessonJson {
     pub id: Uuid,
@@ -169,6 +177,14 @@ pub struct PlanetLessonJson {
     pub kind: String,
     pub title: String,
     pub description: String,
+    /// What this module drills: `verb:have`, `mix`, `past`, `questions`, …
+    pub focus: String,
+    /// The chunks taught here, target-language first.
+    pub structures: Vec<StructureJson>,
+    /// Cards this module's conversation produced, and how many are cleared —
+    /// the second half of the gate on the next module.
+    pub flashcards_total: i64,
+    pub flashcards_reviewed: i64,
     /// The spec's six block states: "locked" | "available" | "in_progress" |
     /// "completed" | "review" | "mastered".
     pub state: String,
@@ -225,6 +241,8 @@ async fn build_summary(
     user_id: Uuid,
     planet: &Planet,
 ) -> Result<PlanetSummary> {
+    let completed_all = repositories::modules::completed_counts_by_planet(pool, user_id).await?;
+    let completed_modules = completed_all.get(&planet.id).copied().unwrap_or(0);
     let progress = repositories::planets::load_progress(pool, user_id, planet.id).await?;
     let mastered = repositories::planets::mastered_sentence_count(pool, user_id, planet.id).await?;
     let total = repositories::planets::sentence_count(pool, planet.id).await?;
@@ -236,17 +254,10 @@ async fn build_summary(
         &planet.language,
     )
     .await?;
-    let prev_info = match prev {
-        Some(p) => {
-            let pp = repositories::planets::load_progress(pool, user_id, p.id).await?;
-            Some((pp, p.unlock_mastery))
-        }
-        None => None,
-    };
     let (status, unlock, review_skills) = summary_fields(
-        planet,
         &progress,
-        prev_info.as_ref().map(|(pp, u)| (pp, *u)),
+        completed_modules,
+        prev.map(|p| completed_all.get(&p.id).copied().unwrap_or(0)),
     );
 
     Ok(PlanetSummary {
@@ -265,7 +276,7 @@ async fn build_summary(
         total_sentences: total,
         level: planet.level.clone(),
         goal: planet.goal.clone(),
-        completed_blocks: services::planets::lessons_completed_count(progress.mastery),
+        completed_blocks: completed_modules,
         total_blocks: services::planets::TOTAL_BLOCKS,
         review_skills,
         progress: ProgressJson::from(&progress),
@@ -333,14 +344,18 @@ async fn list_planets(
             .into_iter()
             .collect();
 
+    // Finished modules per planet: what unlocks the next planet now.
+    let completed_modules =
+        repositories::modules::completed_counts_by_planet(&state.pool, user_id).await?;
+
     let mut out = Vec::with_capacity(all.len());
-    let mut prev: Option<(PlanetProgress, f64)> = None;
+    let mut prev_done: Option<i64> = None;
     for p in &all {
         let prog = by_planet
             .remove(&p.id)
             .unwrap_or_else(|| PlanetProgress::empty(p.id));
-        let (status, unlock, review_skills) =
-            summary_fields(p, &prog, prev.as_ref().map(|(pp, u)| (pp, *u)));
+        let done = completed_modules.get(&p.id).copied().unwrap_or(0);
+        let (status, unlock, review_skills) = summary_fields(&prog, done, prev_done);
         out.push(PlanetSummary {
             id: p.id,
             number: p.number,
@@ -357,12 +372,12 @@ async fn list_planets(
             total_sentences: totals.get(&p.id).copied().unwrap_or(0),
             level: p.level.clone(),
             goal: p.goal.clone(),
-            completed_blocks: services::planets::lessons_completed_count(prog.mastery),
+            completed_blocks: done,
             total_blocks: services::planets::TOTAL_BLOCKS,
             review_skills,
             progress: ProgressJson::from(&prog),
         });
-        prev = Some((prog, p.unlock_mastery));
+        prev_done = Some(done);
     }
 
     Ok(Json(out))
@@ -386,15 +401,14 @@ async fn planet_detail(
         &planet.language,
     )
     .await?;
-    let prev_progress = match &prev {
-        Some(p) => Some(repositories::planets::load_progress(&state.pool, user_id, p.id).await?),
-        None => None,
-    };
-    let prev_info = prev
-        .as_ref()
-        .zip(prev_progress.as_ref())
-        .map(|(p, pp)| (pp, p.unlock_mastery));
-    let (status, unlock, review_skills) = summary_fields(&planet, &progress, prev_info);
+    let completed_all =
+        repositories::modules::completed_counts_by_planet(&state.pool, user_id).await?;
+    let (status, unlock, review_skills) = summary_fields(
+        &progress,
+        completed_all.get(&planet_id).copied().unwrap_or(0),
+        prev.as_ref()
+            .map(|p| completed_all.get(&p.id).copied().unwrap_or(0)),
+    );
 
     let total = repositories::planets::sentence_count(&state.pool, planet_id).await?;
     let mastered =
@@ -426,27 +440,45 @@ async fn planet_detail(
         })
         .collect();
 
-    // The ten-block path, each block carrying its own state (spec §6) derived
-    // from the learner's mastery and the skill the block trains. Blocks unlock
-    // strictly in order: one is only reachable once the previous is done.
-    let rows = repositories::planets::lesson_rows(&state.pool, planet_id).await?;
-    let mut prev_completed = true;
-    let lessons = rows
-        .into_iter()
-        .map(|(id, position, kind, title, description)| {
-            let block = services::planets::block_state(&kind, &progress, prev_completed);
-            prev_completed = services::planets::lesson_completed(&kind, progress.mastery);
-            PlanetLessonJson {
-                id,
-                position,
-                skill: services::planets::block_skill(&kind).to_string(),
-                kind,
-                title,
-                description,
-                state: block,
-            }
-        })
-        .collect::<Vec<_>>();
+    // The ten-module path. State is the real learning cycle now — conversation
+    // then flashcards, strictly in order — not a reading of the mastery
+    // average, so a module only opens once the one before it is truly done.
+    let modules = repositories::modules::lessons_for(&state.pool, planet_id).await?;
+    let module_progress =
+        repositories::modules::progress_for_planet(&state.pool, user_id, planet_id).await?;
+    let states = services::curriculum::module_states(&modules, &module_progress);
+    let mut lessons = Vec::with_capacity(modules.len());
+    for (module, module_state) in modules.iter().zip(&states) {
+        // Only the reachable modules need their card counts: a locked module
+        // has no cards yet, and querying all ten would be ten round trips for
+        // numbers nobody reads.
+        let (flashcards_total, flashcards_reviewed) = if *module_state
+            == services::curriculum::ModuleState::Locked
+        {
+            (0, 0)
+        } else {
+            repositories::modules::flashcard_counts(&state.pool, user_id, module.id).await?
+        };
+        lessons.push(PlanetLessonJson {
+            id: module.id,
+            position: module.position,
+            skill: services::planets::block_skill(&module.kind).to_string(),
+            kind: module.kind.clone(),
+            title: module.title.clone(),
+            description: module.description.clone(),
+            focus: module.focus.clone(),
+            structures: services::curriculum::structures(&module.structures)
+                .into_iter()
+                .map(|s| StructureJson {
+                    target: s.target,
+                    base: s.base,
+                })
+                .collect(),
+            flashcards_total,
+            flashcards_reviewed,
+            state: module_state.as_str().to_string(),
+        });
+    }
 
     let summary = PlanetSummary {
         id: planet.id,
@@ -464,7 +496,7 @@ async fn planet_detail(
         total_sentences: total,
         level: planet.level,
         goal: planet.goal,
-        completed_blocks: services::planets::lessons_completed_count(progress.mastery),
+        completed_blocks: services::curriculum::completed_count(&modules, &module_progress),
         total_blocks: services::planets::TOTAL_BLOCKS,
         review_skills,
         progress: ProgressJson::from(&progress),

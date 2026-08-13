@@ -139,16 +139,13 @@ export const ptBR: Translations = {
   'chat.guestName': 'visitante',
   'chat.planetPill': 'Planeta {{number}} · {{title}}',
   'chat.loadingPlanets': 'Carregando planetas…',
+  'chat.genericPill': 'Conversa livre',
   'chat.logOut': 'Sair',
   'chat.history': 'Histórico de conversas',
   'chat.modeDemo': 'Demo',
   'chat.modeLive': 'Ao vivo',
 
-  // Chat — step indicator
-  'chat.step.listen': 'Escutar',
-  'chat.step.shadow': 'Shadowing',
-  'chat.step.speak': 'Falar',
-  'chat.step.correct': 'Corrigir',
+  // Chat — the single line of guidance above the transcript
   'chat.listenPrompt': 'Escute a frase',
   'chat.speakPrompt': 'Sua vez de falar',
   'chat.correctPrompt': 'Aqui está sua correção',
@@ -195,9 +192,23 @@ export const ptBR: Translations = {
   'chat.hint.connecting': 'Conectando ao seu tutor…',
   'chat.hint.tutorSpeaking': 'O tutor está falando — toque em ■ para encerrar',
   'chat.hint.micLive': 'O microfone está ativo — é só falar. Toque em ■ para encerrar.',
+  'chat.hint.connected': 'Sessão aberta — toque no microfone para falar',
   'chat.hint.tapToStart': 'Toque para iniciar a conversa',
+
+  'chat.empty.title': 'Converse em {{language}}',
+  'chat.empty.subtitle': 'Pratique com a IA em tempo real',
+  'chat.empty.start': 'Iniciar conversa',
+  'chat.newConversation': 'Nova conversa',
+  'chat.lang.en': 'inglês',
+  'chat.lang.es': 'espanhol',
+  'chat.lang.pt': 'português',
   'chat.hint.demoPause': 'Aula demo · toque para pausar',
   'chat.hint.demoResume': 'Pausado · toque para continuar',
+
+  // Chat — bottom composer (typed messages + one-tap voice send)
+  'chat.input.placeholder': 'Digite uma mensagem…',
+  'chat.input.send': 'Enviar mensagem',
+  'chat.input.sendAudio': 'Enviar mensagem de voz',
 
   // Chat — history list & detail
   'chat.history.title': 'Histórico',
@@ -212,12 +223,14 @@ export const ptBR: Translations = {
   'chat.history.detailLoading': 'Carregando…',
   'chat.history.noMessages': 'Esta conversa ainda não tem mensagens.',
   'chat.history.liveConversationTitle': 'Conversa ao vivo',
+  'chat.history.freeChatTitle': 'Conversa livre',
   'chat.history.lessonTitle': 'Aula · Planeta {{number}}',
 
   // Flashcards
   'flashcards.header': 'Cartões',
   'flashcards.headerSub': 'A repetição espaçada mantém tudo fresco',
   'flashcards.allCards': 'Todos os cartões',
+  'flashcards.moduleGate': '{{done}} de {{total}} revisados — conclua para abrir o próximo módulo',
   'flashcards.studyNow': 'Estudar agora',
   'flashcards.cardOne': '{{count}} cartão',
   'flashcards.cardOther': '{{count}} cartões',
@@ -285,21 +298,32 @@ export const ptBR: Translations = {
 
   // Audio (a biblioteca de histórias da spec + player para o carro)
   'audio.title': 'Histórias em áudio',
-  'audio.subtitle': '{{count}} história pronta — uma por planeta conquistado',
   'audio.loading': 'Carregando suas histórias…',
-  'audio.readyToGenerate': 'Prontas para gerar',
   'audio.footerNote':
     'Conclua os 10 blocos de um planeta e a história personalizada dele é gerada para você.',
   'audio.lockedHint': 'Conquiste este planeta para desbloquear a história',
+  'audio.notSeeded': 'Esta história está sendo preparada — volte em breve.',
+  'audio.lockedBody': 'Conclua os 10 blocos deste planeta e a história aparece aqui.',
   'audio.minOne': '{{count}} min',
   'audio.minOther': '{{count}} min',
-  'audio.resumed': 'Continuar ouvindo',
-  'audio.ready': 'Pronto para ouvir',
-  'audio.awaitingGeneration': 'História pendente — conclua os blocos',
-  'audio.generate': 'Gerar',
-  'audio.generating': 'Escrevendo…',
-  'audio.writing': 'O Huppy está escrevendo sua história…',
   'audio.translation': 'Tradução',
+  'audio.blocksDone': '{{done}} de {{total}} blocos concluídos',
+  'audio.heroBody': 'Tudo o que você aprendeu nos {{count}} blocos, em uma história criada para você.',
+  'audio.aiGenerated': 'Gerado com IA',
+  'audio.resumeLabel': 'Continuar de onde parou',
+  'audio.startLabel': 'Começar a ouvir',
+  'audio.prevSentence': 'Frase anterior',
+  'audio.back15': 'Voltar 15s',
+  'audio.forward15': 'Avançar 15s',
+  'audio.nextSentence': 'Próxima frase',
+  'audio.play': 'Reproduzir',
+  'audio.pause': 'Pausar',
+  'audio.speed': 'Velocidade',
+  'audio.transcript': 'Transcrição',
+  'audio.howItWorks': 'Como este áudio funciona',
+  'audio.howItWorksBody': 'A história usa apenas palavras, estruturas e tempos verbais que você já estudou.',
+  'audio.nextLockedBody': 'Conclua os {{count}} blocos para gerar a próxima história.',
+  'audio.nextReadyBody': 'Desbloqueado — abra para ouvir ou gerar a história.',
 
   // Planets
   'planets.audioModeLanguageOnly': 'Só o idioma',
@@ -357,6 +381,8 @@ export const ptBR: Translations = {
   'planets.nextActivity': 'Próxima atividade',
   'planets.blocks': 'Blocos',
   'planets.startReview': 'Fazer revisão',
+  'planets.reviewCards': 'Revisar cartões',
+  'lessons.cardsProgress': '{{done}}/{{total}} cartões',
   'planets.unlockAt': 'Libera com {{percent}}% do planeta anterior',
 
   // As seis fases da jornada de 60 planetas
@@ -374,6 +400,7 @@ export const ptBR: Translations = {
   'state.inProgress': 'Em andamento',
   'state.completed': 'Concluído',
   'state.review': 'Revisão necessária',
+  'state.flashcardsPending': 'Cartões pendentes',
   'state.conquered': 'Conquistado',
   'state.mastered': 'Dominado',
 

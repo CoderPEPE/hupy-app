@@ -139,19 +139,13 @@ export const en = {
   'chat.guestName': 'there',
   'chat.planetPill': 'Planet {{number}} · {{title}}',
   'chat.loadingPlanets': 'Loading planets…',
+  'chat.genericPill': 'Free chat',
   'chat.logOut': 'Log out',
   'chat.history': 'Conversation history',
   'chat.modeDemo': 'Demo',
   'chat.modeLive': 'Live',
 
-  // Chat — step indicator (approximates the live conversation as 4 phases;
-  // "Shadowing" and "Falar" are split by a short timer since the realtime
-  // API doesn't expose a discrete signal for "still repeating" vs "talking
-  // freely" — see ChatScreen.tsx)
-  'chat.step.listen': 'Listen',
-  'chat.step.shadow': 'Shadowing',
-  'chat.step.speak': 'Speak',
-  'chat.step.correct': 'Correct',
+  // Chat — the single line of guidance above the transcript
   'chat.listenPrompt': 'Listen to the phrase',
   'chat.speakPrompt': 'Your turn to speak',
   'chat.correctPrompt': 'Here is your correction',
@@ -198,9 +192,25 @@ export const en = {
   'chat.hint.connecting': 'Connecting to your tutor…',
   'chat.hint.tutorSpeaking': 'Tutor is speaking — tap ■ to end',
   'chat.hint.micLive': 'Mic is live — just talk. Tap ■ to end.',
+  'chat.hint.connected': 'Session open — tap the mic to talk',
   'chat.hint.tapToStart': 'Tap to start the conversation',
+
+  // Empty chat — the orb and its invitation. `chat.lang.*` are the names of
+  // the language being learned, written in the interface's own language.
+  'chat.empty.title': 'Talk in {{language}}',
+  'chat.empty.subtitle': 'Practice with AI in real time',
+  'chat.empty.start': 'Start conversation',
+  'chat.newConversation': 'New conversation',
+  'chat.lang.en': 'English',
+  'chat.lang.es': 'Spanish',
+  'chat.lang.pt': 'Portuguese',
   'chat.hint.demoPause': 'Demo lesson · tap to pause',
   'chat.hint.demoResume': 'Paused · tap to resume',
+
+  // Chat — bottom composer (typed messages + one-tap voice send)
+  'chat.input.placeholder': 'Type a message…',
+  'chat.input.send': 'Send message',
+  'chat.input.sendAudio': 'Send a voice message',
 
   // Chat — history list & detail
   'chat.history.title': 'History',
@@ -215,12 +225,14 @@ export const en = {
   'chat.history.detailLoading': 'Loading…',
   'chat.history.noMessages': 'This conversation has no messages yet.',
   'chat.history.liveConversationTitle': 'Live conversation',
+  'chat.history.freeChatTitle': 'Free conversation',
   'chat.history.lessonTitle': 'Lesson · Planet {{number}}',
 
   // Flashcards
   'flashcards.header': 'Flashcards',
   'flashcards.headerSub': 'Spaced repetition keeps it fresh',
   'flashcards.allCards': 'All cards',
+  'flashcards.moduleGate': '{{done}} of {{total}} reviewed — finish these to open the next module',
   'flashcards.studyNow': 'Study now',
   'flashcards.cardOne': '{{count}} card',
   'flashcards.cardOther': '{{count}} cards',
@@ -288,21 +300,32 @@ export const en = {
 
   // Audio (the spec's story library + car-ready player)
   'audio.title': 'Audio stories',
-  'audio.subtitle': '{{count}} story ready — one per conquered planet',
   'audio.loading': 'Loading your stories…',
-  'audio.readyToGenerate': 'Ready to generate',
   'audio.footerNote':
     'Finish all 10 blocks of a planet and its personalized story is generated for you.',
   'audio.lockedHint': 'Conquer this planet to unlock its story',
+  'audio.notSeeded': 'This story is being prepared — check back soon.',
+  'audio.lockedBody': 'Finish this planet’s 10 blocks and its story unlocks here.',
   'audio.minOne': '{{count}} min',
   'audio.minOther': '{{count}} min',
-  'audio.resumed': 'Continue listening',
-  'audio.ready': 'Ready to play',
-  'audio.awaitingGeneration': 'Story pending — finish the blocks',
-  'audio.generate': 'Generate',
-  'audio.generating': 'Writing…',
-  'audio.writing': 'Huppy is writing your story…',
   'audio.translation': 'Translation',
+  'audio.blocksDone': '{{done}} of {{total}} blocks completed',
+  'audio.heroBody': 'Everything you learned across the {{count}} blocks, in a story written for you.',
+  'audio.aiGenerated': 'Made with AI',
+  'audio.resumeLabel': 'Pick up where you left off',
+  'audio.startLabel': 'Start listening',
+  'audio.prevSentence': 'Previous',
+  'audio.back15': 'Back 15s',
+  'audio.forward15': 'Forward 15s',
+  'audio.nextSentence': 'Next',
+  'audio.play': 'Play',
+  'audio.pause': 'Pause',
+  'audio.speed': 'Speed',
+  'audio.transcript': 'Transcript',
+  'audio.howItWorks': 'How this audio works',
+  'audio.howItWorksBody': 'The story only uses words, structures, and tenses you have already studied.',
+  'audio.nextLockedBody': 'Finish the {{count}} blocks to generate the next story.',
+  'audio.nextReadyBody': 'Unlocked — open it to listen or generate its story.',
 
   // Planets
   // Named for the target language, not English — the course language varies.
@@ -361,6 +384,8 @@ export const en = {
   'planets.nextActivity': 'Next activity',
   'planets.blocks': 'Blocks',
   'planets.startReview': 'Start review',
+  'planets.reviewCards': 'Review cards',
+  'lessons.cardsProgress': '{{done}}/{{total}} cards',
   'planets.unlockAt': 'Unlocks at {{percent}}% of the previous planet',
 
   // The six phases of the 60-planet journey
@@ -378,6 +403,7 @@ export const en = {
   'state.inProgress': 'In progress',
   'state.completed': 'Completed',
   'state.review': 'Review needed',
+  'state.flashcardsPending': 'Cards to review',
   'state.conquered': 'Conquered',
   'state.mastered': 'Mastered',
 

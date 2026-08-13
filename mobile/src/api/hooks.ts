@@ -24,7 +24,8 @@ import {
   getConversations,
 } from './conversations';
 import { getGamificationStats } from './gamification';
-import { generateStory, getStories, saveStoryProgress } from './stories';
+import { completeModuleConversation } from './modules';
+import { getStories, saveStoryProgress } from './stories';
 import { getVoices } from './voices';
 import { storage, StorageKeys } from '../storage';
 import type { CardRating } from '../types';
@@ -154,13 +155,17 @@ export function useMasterSentence() {
   });
 }
 
-export function useGenerateStory() {
+/** Closes the current module's conversation (the tutor's `complete_module`).
+ * Refreshes the planet so the module list shows the new gate immediately. */
+export function useCompleteModule() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: generateStory,
+    mutationFn: ({ lessonId, weakStructures }: { lessonId: string; weakStructures?: string[] }) =>
+      completeModuleConversation(lessonId, weakStructures ?? []),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.stories });
       qc.invalidateQueries({ queryKey: queryKeys.planets });
+      qc.invalidateQueries({ queryKey: ['flashcards'] });
+      qc.invalidateQueries({ queryKey: queryKeys.stories });
     },
   });
 }
