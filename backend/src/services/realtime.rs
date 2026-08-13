@@ -420,7 +420,9 @@ async fn build_instructions_for(
                 if module.focus.is_empty() {
                     module.kind.as_str()
                 } else {
-                    module.focus.as_str()
+                    // Stored as "focus:greetings" / "past"; the prefix is a
+                    // storage detail, not something to read out at the tutor.
+                    module.focus.strip_prefix("focus:").unwrap_or(&module.focus)
                 },
             ));
             if !module.description.is_empty() {
