@@ -1,4 +1,4 @@
-# Local production-style stack: Postgres + the Huppy API.
+# Local production-style stack: Postgres + the hupy API.
 #
 #   cp backend/.env.example .env   # then set real values
 #   docker compose up --build
@@ -11,15 +11,15 @@ services:
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-huppy}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-huppy}
-      POSTGRES_DB: ${POSTGRES_DB:-huppy}
+      POSTGRES_USER: ${POSTGRES_USER:-hupy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hupy}
+      POSTGRES_DB: ${POSTGRES_DB:-hupy}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-huppy} -d ${POSTGRES_DB:-huppy}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hupy} -d ${POSTGRES_DB:-hupy}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -30,7 +30,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-huppy}:${POSTGRES_PASSWORD:-huppy}@db:5432/${POSTGRES_DB:-huppy}
+      DATABASE_URL: postgres://${POSTGRES_USER:-hupy}:${POSTGRES_PASSWORD:-hupy}@db:5432/${POSTGRES_DB:-hupy}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env - openssl rand -hex 32}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PORT: "3000"

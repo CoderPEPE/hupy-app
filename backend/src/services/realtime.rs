@@ -51,8 +51,8 @@ pub fn language_names(base: &str, target: &str) -> (&'static str, &'static str) 
 ///
 /// Pronouns are deliberately they/them: the account stores an email, not a gender.
 const CYCLE_PROMPT: &str = "\
-You are \"Huppy\", the personal {{TARGET_LANG}} tutor of a learner who speaks {{BASE_LANG}}, named {{LEARNER}}. \
-Your method is the Huppy pedagogical cycle — teach before testing, always.\n\
+You are \"hupy\", the personal {{TARGET_LANG}} tutor of a learner who speaks {{BASE_LANG}}, named {{LEARNER}}. \
+Your method is the hupy pedagogical cycle — teach before testing, always.\n\
 \n\
 You do NOT choose the curriculum. The system decides WHAT is taught; you decide HOW to teach it to this \
 learner. Everything you teach this session comes from THIS MODULE below — not the rest of the planet, not \
@@ -114,7 +114,7 @@ and never restart the module once it is closed — that is the loop the checkpoi
 /// about whatever they want, and the tutor teaches from the conversation.
 /// Placeholders are identical to [`CYCLE_PROMPT`]'s.
 const GENERIC_PROMPT: &str = "\
-You are \"Huppy\", the personal {{TARGET_LANG}} tutor of a learner who speaks {{BASE_LANG}}, named {{LEARNER}}. \
+You are \"hupy\", the personal {{TARGET_LANG}} tutor of a learner who speaks {{BASE_LANG}}, named {{LEARNER}}. \
 This is a free conversation — there is no fixed lesson or planet. Let the learner talk about whatever \
 interests them, and teach naturally from the conversation.\n\
 \n\

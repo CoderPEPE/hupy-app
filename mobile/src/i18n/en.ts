@@ -26,7 +26,7 @@ export const en = {
   // Full-screen offline state (components/OfflineScreen.tsx) — shown while
   // the backend is unreachable. The app clears it automatically on recovery.
   'offline.title': 'No connection',
-  'offline.body': 'Huppy needs the server to reach your tutor. Check your internet connection — we will reconnect automatically.',
+  'offline.body': 'hupy needs the server to reach your tutor. Check your internet connection — we will reconnect automatically.',
   'offline.retry': 'Try again',
 
   // Auth — shared
@@ -270,7 +270,7 @@ export const en = {
   'flashcards.ratingMedium': 'Almost',
   'flashcards.ratingEasy': 'Learned',
   'flashcards.planetFallback': 'Planet',
-  'flashcards.pendingRecheck': "Marked easy — Huppy will double-check this live",
+  'flashcards.pendingRecheck': "Marked easy — hupy will double-check this live",
   'flashcards.structureBack': 'Structure',
   'flashcards.toReview': 'Review',
   'flashcards.learned': 'Learned',
@@ -474,7 +474,7 @@ export const en = {
 
   // Course overview (pre-login) — every figure comes from /api/planets/catalog
   'course.title': 'What you will learn',
-  'course.eyebrow': 'THE HUPPY METHOD',
+  'course.eyebrow': 'THE hupy METHOD',
   'course.body':
     'Every phrase is practiced out loud with your tutor, corrected in the moment, and brought back for review right before you would forget it.',
   'course.cta': 'Start learning',
@@ -492,13 +492,13 @@ export const en = {
 
   // Mic / voice-recognition permission modal
   'permissionModal.title': 'Your turn to speak!',
-  'permissionModal.body': 'Turn on the Microphone and Speech Recognition so Huppy can correct your pronunciation.',
+  'permissionModal.body': 'Turn on the Microphone and Speech Recognition so hupy can correct your pronunciation.',
   'permissionModal.unlockMic': 'Enable microphone',
   'permissionModal.unlockSpeech': 'Enable speech recognition',
 
   // Voice (useVoiceConversation.ts)
   'voice.micPermissionTitle': 'Microphone access',
-  'voice.micPermissionMessage': 'Huppy needs the microphone so you can practice speaking.',
+  'voice.micPermissionMessage': 'hupy needs the microphone so you can practice speaking.',
   'voice.micPermissionAllow': 'Allow',
   'voice.micPermissionDeny': 'Deny',
   'voice.micFailedToStart': 'Microphone failed to start. Check permissions.',

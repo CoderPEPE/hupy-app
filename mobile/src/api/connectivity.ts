@@ -3,7 +3,7 @@ import { AppState } from 'react-native';
 import { API_BASE_URL } from '../config';
 
 /**
- * Reachability of the Huppy backend, from the app's point of view.
+ * Reachability of the hupy backend, from the app's point of view.
  *
  * The app is useless without its server (the tutor, the planets, the cards —
  * everything lives there), so "offline" here means "can't reach the

@@ -10,7 +10,7 @@ const DEV_BASE_URL = Platform.select({
 
 /**
  * In production builds, set EXPO_PUBLIC_API_URL to the HTTPS backend URL
- * (e.g. https://api.huppy.example.com). Expo inlines EXPO_PUBLIC_* variables
+ * (e.g. https://api.hupy.example.com). Expo inlines EXPO_PUBLIC_* variables
  * at bundle time, so this needs a rebuild after changing it.
  */
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? DEV_BASE_URL;

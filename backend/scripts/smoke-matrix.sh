@@ -12,7 +12,7 @@ export PORT
 lsof -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null | xargs -r kill || true
 sleep 1
 
-cargo run > /tmp/huppy-matrix.log 2>&1 &
+cargo run > /tmp/hupy-matrix.log 2>&1 &
 trap 'lsof -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null | xargs -r kill || true' EXIT
 
 for i in $(seq 1 60); do

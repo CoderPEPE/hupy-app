@@ -1,4 +1,4 @@
-//! Huppy backend library crate.
+//! hupy backend library crate.
 //!
 //! The binary (`main.rs`) only boots and serves; every module lives here so
 //! the integration tests in `tests/` can link the whole application and

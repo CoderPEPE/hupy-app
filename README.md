@@ -1,4 +1,4 @@
-# Huppy — English conversation practice with voice
+# hupy — English conversation practice with voice
 
 A Duolingo-style English learning app where you have realtime voice conversations with an AI tutor.
 
@@ -183,7 +183,7 @@ simulator run described below):
   unlocked, binding the session to the device (Android auto-backup is
   disabled via `android.allowBackup`). On iOS the keychain items are pinned
   to an explicit access group (`ios.entitlements` →
-  `keychain-access-groups` → `$(AppIdentifierPrefix)com.conjuntos.huppy`),
+  `keychain-access-groups` → `$(AppIdentifierPrefix)com.hupy.hupy`),
   which resolves to the same group the app already used by default — the
   entitlement makes the group's location explicit and stable across
   certificate/profile rotation within the same team (dev / ad-hoc /

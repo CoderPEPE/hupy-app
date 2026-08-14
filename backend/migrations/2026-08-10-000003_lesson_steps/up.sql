@@ -1,5 +1,5 @@
 -- Scripted pedagogical lessons, one per planet. Each step is a tutor turn
--- that follows the Huppy cycle: teach -> repeat -> question -> correction ->
+-- that follows the hupy cycle: teach -> repeat -> question -> correction ->
 -- review -> praise. Corrections embed the "you said / correct form" pair so
 -- the app can persist them into a conversation and turn them into flashcards.
 

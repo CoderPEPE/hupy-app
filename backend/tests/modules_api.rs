@@ -5,7 +5,7 @@
 mod common;
 
 use common::{app, pool, register, request, unique_email};
-use huppy_backend::repositories;
+use hupy_backend::repositories;
 use serde_json::json;
 
 /// Gives a module an authored chunk list (what the `seed_curriculum` binary

@@ -5,7 +5,7 @@ import { useT } from '../i18n';
 import { colors, radius, shadows, spacing } from '../theme';
 
 /** One-time primer shown before the OS microphone permission dialog — explains
- * why Huppy needs the mic, matching the reference "Sua vez de falar!" modal.
+ * why hupy needs the mic, matching the reference "Sua vez de falar!" modal.
  * Both buttons lead to the same real permission flow (this app's audio
  * pipeline doesn't have separately toggleable mic vs. speech-recognition
  * permissions), kept as two buttons to match the reference's layout. */

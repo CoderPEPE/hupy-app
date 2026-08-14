@@ -200,7 +200,7 @@ mod tests {
             || {
                 assert!(Config::from_env().unwrap_err().contains("DATABASE_URL"));
 
-                env::set_var("DATABASE_URL", "postgres://localhost/huppy");
+                env::set_var("DATABASE_URL", "postgres://localhost/hupy");
                 env::remove_var("JWT_SECRET");
                 assert!(Config::from_env().unwrap_err().contains("JWT_SECRET"));
             },
@@ -211,7 +211,7 @@ mod tests {
     fn defaults_apply_when_tunables_are_unset() {
         with_env(
             || {
-                env::set_var("DATABASE_URL", "postgres://localhost/huppy");
+                env::set_var("DATABASE_URL", "postgres://localhost/hupy");
                 env::set_var("JWT_SECRET", "0123456789abcdef0123456789abcdef");
                 for k in ALL_VARS.iter().skip(2) {
                     env::remove_var(k);
@@ -242,7 +242,7 @@ mod tests {
     fn explicit_values_are_read() {
         with_env(
             || {
-                env::set_var("DATABASE_URL", "postgres://localhost/huppy");
+                env::set_var("DATABASE_URL", "postgres://localhost/hupy");
                 env::set_var("JWT_SECRET", "0123456789abcdef0123456789abcdef");
                 env::set_var("PORT", "8080");
                 env::set_var("CORS_ORIGIN", "https://app.example.com");
@@ -283,7 +283,7 @@ mod tests {
     fn non_numeric_tunables_fall_back_to_defaults() {
         with_env(
             || {
-                env::set_var("DATABASE_URL", "postgres://localhost/huppy");
+                env::set_var("DATABASE_URL", "postgres://localhost/hupy");
                 env::set_var("JWT_SECRET", "0123456789abcdef0123456789abcdef");
                 env::set_var("PORT", "not-a-port");
                 env::set_var("AUTH_RATE_MAX", "-1");

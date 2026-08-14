@@ -7,7 +7,7 @@ import { createMMKV, deleteMMKV, type MMKV } from 'react-native-mmkv';
  * flags, tutor voice). Never holds credentials — those live in the
  * encrypted instance below.
  */
-export const storage = createMMKV({ id: 'huppy-storage' });
+export const storage = createMMKV({ id: 'hupy-storage' });
 
 /**
  * Credential keys, stored ONLY in the encrypted MMKV. Keeping them out of
@@ -53,9 +53,9 @@ export const StorageKeys = {
 // Encrypted credential storage
 // ---------------------------------------------------------------------------
 
-const SECURE_STORAGE_ID = 'huppy-secure-storage';
+const SECURE_STORAGE_ID = 'hupy-secure-storage';
 // The Keychain service isolates the key from any other app's keychain items.
-const KEYCHAIN_SERVICE = 'com.conjuntos.huppy.secure-storage';
+const KEYCHAIN_SERVICE = 'com.hupy.hupy.secure-storage';
 const KEYCHAIN_KEY = 'mmkv.encryption-key.v1';
 // Read options share the service; write options additionally pin the
 // accessibility so the key never syncs off-device and is only readable while
@@ -66,7 +66,7 @@ const KEYCHAIN_WRITE_OPTIONS = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
 // iOS keychain access group, declared in app.json (`ios.entitlements`:
-// keychain-access-groups -> $(AppIdentifierPrefix)com.conjuntos.huppy).
+// keychain-access-groups -> $(AppIdentifierPrefix)com.hupy.hupy).
 //
 // We deliberately do NOT pass `accessGroup` to expo-secure-store: the macro
 // is only expanded at build time, and the runtime option needs the resolved
@@ -75,7 +75,7 @@ const KEYCHAIN_WRITE_OPTIONS = {
 // group (Apple: the effective list is [keychain-access-groups] +
 // [application-identifier] + [app groups], first entry wins) — and since the
 // entitlement resolves to exactly the application-identifier group the app
-// already used by default (TeamID.com.conjuntos.huppy), existing items stay
+// already used by default (TeamID.com.hupy.hupy), existing items stay
 // in place across the upgrade.
 //
 // Why pin it at all: the group is now explicit, so it survives signing
@@ -85,8 +85,8 @@ const KEYCHAIN_WRITE_OPTIONS = {
 // items, and no entitlement can bridge that — iOS forbids it by design.
 // Written into the encrypted store at creation; a read that doesn't return it
 // means the key and the file disagree, so the file is unrecoverable garbage.
-const SENTINEL_KEY = 'huppy.secure.sentinel';
-const SENTINEL_VALUE = 'huppy-encrypted-v1';
+const SENTINEL_KEY = 'hupy.secure.sentinel';
+const SENTINEL_VALUE = 'hupy-encrypted-v1';
 
 let secureStorage: MMKV | null = null;
 let secureInitPromise: Promise<void> | null = null;

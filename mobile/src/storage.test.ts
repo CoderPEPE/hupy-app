@@ -16,9 +16,9 @@ import { SecureKeys } from './storage';
 // deterministic: 64 chars of "ab".
 const DETERMINISTIC_KEY = 'ab'.repeat(32);
 const KEY_NAME = 'mmkv.encryption-key.v1';
-const KEY_OPTIONS = { keychainService: 'com.conjuntos.huppy.secure-storage' };
-const PLAIN_ID = 'huppy-storage';
-const SECURE_ID = 'huppy-secure-storage';
+const KEY_OPTIONS = { keychainService: 'com.hupy.hupy.secure-storage' };
+const PLAIN_ID = 'hupy-storage';
+const SECURE_ID = 'hupy-secure-storage';
 
 /** A fresh module instance plus the SecureStore mock *it* imports. */
 function freshStorage() {
@@ -100,8 +100,8 @@ describe('initSecureStorage', () => {
     );
     const stored = await SecureStore.getItemAsync(KEY_NAME, KEY_OPTIONS);
     expect(stored).toBe(DETERMINISTIC_KEY);
-    expect(fresh.mod.getSecureStorage().getString('huppy.secure.sentinel')).toBe(
-      'huppy-encrypted-v1',
+    expect(fresh.mod.getSecureStorage().getString('hupy.secure.sentinel')).toBe(
+      'hupy-encrypted-v1',
     );
   });
 
@@ -165,7 +165,7 @@ describe('initSecureStorage', () => {
     await boot2.mod.initSecureStorage();
 
     const secure = boot2.mod.getSecureStorage();
-    expect(secure.getString('huppy.secure.sentinel')).toBe('huppy-encrypted-v1');
+    expect(secure.getString('hupy.secure.sentinel')).toBe('hupy-encrypted-v1');
     // Boot 1's ciphertext is unrecoverable and gone, not silently readable.
     expect(secure.getString(SecureKeys.refreshToken)).toBeNull();
     // The stale key B was replaced by a freshly generated one.
@@ -188,8 +188,8 @@ describe('initSecureStorage', () => {
     // Retry succeeds and bootstraps the store.
     await fresh.mod.initSecureStorage();
     expect(fresh.mod.isSecureStorageReady()).toBe(true);
-    expect(fresh.mod.getSecureStorage().getString('huppy.secure.sentinel')).toBe(
-      'huppy-encrypted-v1',
+    expect(fresh.mod.getSecureStorage().getString('hupy.secure.sentinel')).toBe(
+      'hupy-encrypted-v1',
     );
   });
 });
@@ -272,7 +272,7 @@ describe('manual re-key (rotateSecureStorageKey)', () => {
     expect(rotated.getString(SecureKeys.authToken)).toBe('token-1');
     expect(rotated.getString(SecureKeys.refreshToken)).toBe('refresh-1');
     expect(rotated.getString(SecureKeys.authUser)).toBe('{"id":"u1"}');
-    expect(rotated.getString('huppy.secure.sentinel')).toBe('huppy-encrypted-v1');
+    expect(rotated.getString('hupy.secure.sentinel')).toBe('hupy-encrypted-v1');
     // A fresh key was genuinely persisted: the first-install persist plus the
     // manual re-key is exactly two re-key writes.
     const writes = (SecureStore.setItemAsync as jest.Mock).mock.calls.filter(
@@ -289,8 +289,8 @@ describe('manual re-key (rotateSecureStorageKey)', () => {
     await fresh.mod.rotateSecureStorageKey();
 
     expect(fresh.mod.getSecureStorage()).not.toBe(before);
-    expect(fresh.mod.getSecureStorage().getString('huppy.secure.sentinel')).toBe(
-      'huppy-encrypted-v1',
+    expect(fresh.mod.getSecureStorage().getString('hupy.secure.sentinel')).toBe(
+      'hupy-encrypted-v1',
     );
   });
 
@@ -300,8 +300,8 @@ describe('manual re-key (rotateSecureStorageKey)', () => {
 
     await expect(fresh.mod.rotateSecureStorageKey()).resolves.toBeUndefined();
 
-    expect(fresh.mod.getSecureStorage().getString('huppy.secure.sentinel')).toBe(
-      'huppy-encrypted-v1',
+    expect(fresh.mod.getSecureStorage().getString('hupy.secure.sentinel')).toBe(
+      'hupy-encrypted-v1',
     );
   });
 
@@ -316,8 +316,8 @@ describe('manual re-key (rotateSecureStorageKey)', () => {
     const boot2 = freshStorage();
     await boot2.mod.initSecureStorage();
     expect(boot2.mod.getSecureStorage().getString(SecureKeys.authToken)).toBe('token-1');
-    expect(boot2.mod.getSecureStorage().getString('huppy.secure.sentinel')).toBe(
-      'huppy-encrypted-v1',
+    expect(boot2.mod.getSecureStorage().getString('hupy.secure.sentinel')).toBe(
+      'hupy-encrypted-v1',
     );
   });
 
@@ -370,7 +370,7 @@ describe('key rotation security', () => {
     await boot2.mod.initSecureStorage();
 
     const secure2 = boot2.mod.getSecureStorage();
-    expect(secure2.getString('huppy.secure.sentinel')).toBe('huppy-encrypted-v1');
+    expect(secure2.getString('hupy.secure.sentinel')).toBe('hupy-encrypted-v1');
     expectSignedOut(secure2);
     // Boot 1's first-install persist + boot 2's rotation = exactly two re-key
     // writes: the rotation genuinely fired.
@@ -394,7 +394,7 @@ describe('key rotation security', () => {
     await boot2.mod.initSecureStorage();
 
     const secure2 = boot2.mod.getSecureStorage();
-    expect(secure2.getString('huppy.secure.sentinel')).toBe('huppy-encrypted-v1');
+    expect(secure2.getString('hupy.secure.sentinel')).toBe('hupy-encrypted-v1');
     expectSignedOut(secure2);
     // Boot 1's persist + boot 2's rotation (the foreign seed is filtered out
     // by the value check): the stale key was rotated away, not kept.
@@ -419,7 +419,7 @@ describe('key rotation security', () => {
 
     // The smuggled data is destroyed, never copied into the rotated store.
     const secure = fresh.mod.getSecureStorage();
-    expect(secure.getString('huppy.secure.sentinel')).toBe('huppy-encrypted-v1');
+    expect(secure.getString('hupy.secure.sentinel')).toBe('hupy-encrypted-v1');
     expectSignedOut(secure);
     // Exactly one re-key write (the rotation; the stale-key seed is filtered
     // out): the smuggled store was wiped under a freshly persisted key.

@@ -31,7 +31,7 @@ CREATE TABLE user_badges (
 INSERT INTO badges (code, title, description, icon) VALUES
 ('first_correction', 'First Correction', 'Received your first pronunciation or grammar correction', 'sparkles'),
 ('first_flashcard', 'Card Collector', 'Created your first flashcard', 'layers'),
-('first_conversation', 'First Contact', 'Completed your first live conversation with Huppy', 'message-circle'),
+('first_conversation', 'First Contact', 'Completed your first live conversation with hupy', 'message-circle'),
 ('streak_3', '3-Day Streak', 'Practiced 3 days in a row', 'flame'),
 ('streak_7', '7-Day Streak', 'Practiced 7 days in a row', 'flame'),
 ('planet_1_complete', 'Mercury Mastered', 'Completed your first planet', 'rocket'),

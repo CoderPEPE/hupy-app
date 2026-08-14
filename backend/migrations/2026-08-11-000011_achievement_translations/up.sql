@@ -17,7 +17,7 @@ ALTER TABLE badges
 UPDATE badges SET description = 'Complete your first planet'                            WHERE code = 'planet_1_complete';
 UPDATE badges SET description = 'Review 50 flashcards'                                  WHERE code = 'cards_50';
 UPDATE badges SET description = 'Create your first flashcard'                           WHERE code = 'first_flashcard';
-UPDATE badges SET description = 'Complete your first live conversation with Huppy'      WHERE code = 'first_conversation';
+UPDATE badges SET description = 'Complete your first live conversation with hupy'      WHERE code = 'first_conversation';
 UPDATE badges SET description = 'Receive your first pronunciation or grammar correction' WHERE code = 'first_correction';
 UPDATE badges SET description = 'Practice 3 days in a row'                              WHERE code = 'streak_3';
 UPDATE badges SET description = 'Practice 7 days in a row'                              WHERE code = 'streak_7';
@@ -92,19 +92,19 @@ FROM (VALUES
 ('cards_250',  'Máquina de Revisão',    'Revise 250 cartões',  'Máquina de Repaso',   'Repasa 250 tarjetas'),
 ('cards_500',  'Mestre da Repetição',   'Revise 500 cartões',  'Maestro del Repaso',  'Repasa 500 tarjetas'),
 ('cards_1000', 'Clube dos Mil',         'Revise 1000 cartões', 'Club de los Mil',     'Repasa 1000 tarjetas'),
-('verified_1',   'Provado Uma Vez',   'Tenha um cartão marcado como fácil confirmado ao vivo pelo Huppy', 'Probado Una Vez',    'Ten una tarjeta marcada como fácil confirmada en vivo por Huppy'),
+('verified_1',   'Provado Uma Vez',   'Tenha um cartão marcado como fácil confirmado ao vivo pelo hupy', 'Probado Una Vez',    'Ten una tarjeta marcada como fácil confirmada en vivo por hupy'),
 ('verified_10',  'Provado Dez Vezes', 'Tenha 10 cartões fáceis confirmados ao vivo',                     'Probado Diez Veces', 'Ten 10 tarjetas fáciles confirmadas en vivo'),
 ('verified_25',  'Sem Blefe',         'Tenha 25 cartões fáceis confirmados ao vivo',                     'Sin Farolear',       'Ten 25 tarjetas fáciles confirmadas en vivo'),
 ('verified_50',  'Sabe de Verdade',   'Tenha 50 cartões fáceis confirmados ao vivo',                     'Lo Sabe de Verdad',  'Ten 50 tarjetas fáciles confirmadas en vivo'),
 ('verified_100', 'Sem Dúvida',        'Tenha 100 cartões fáceis confirmados ao vivo',                    'Sin Ninguna Duda',   'Ten 100 tarjetas fáciles confirmadas en vivo'),
 
-('first_conversation', 'Primeiro Contato', 'Complete sua primeira conversa ao vivo com o Huppy', 'Primer Contacto', 'Completa tu primera conversación en vivo con Huppy'),
-('talks_3',   'Três Sessões',      'Tenha 3 conversas com o Huppy',   'Tres Sesiones',     'Ten 3 conversaciones con Huppy'),
-('talks_5',   'Cinco Sessões',     'Tenha 5 conversas com o Huppy',   'Cinco Sesiones',    'Ten 5 conversaciones con Huppy'),
-('talks_10',  'Falante Assíduo',   'Tenha 10 conversas com o Huppy',  'Hablante Habitual', 'Ten 10 conversaciones con Huppy'),
-('talks_25',  'Voz Confiante',     'Tenha 25 conversas com o Huppy',  'Voz Segura',        'Ten 25 conversaciones con Huppy'),
-('talks_50',  'Papo Natural',      'Tenha 50 conversas com o Huppy',  'Charla Natural',    'Ten 50 conversaciones con Huppy'),
-('talks_100', 'Nunca em Silêncio', 'Tenha 100 conversas com o Huppy', 'Nunca en Silencio', 'Ten 100 conversaciones con Huppy'),
+('first_conversation', 'Primeiro Contato', 'Complete sua primeira conversa ao vivo com o hupy', 'Primer Contacto', 'Completa tu primera conversación en vivo con hupy'),
+('talks_3',   'Três Sessões',      'Tenha 3 conversas com o hupy',   'Tres Sesiones',     'Ten 3 conversaciones con hupy'),
+('talks_5',   'Cinco Sessões',     'Tenha 5 conversas com o hupy',   'Cinco Sesiones',    'Ten 5 conversaciones con hupy'),
+('talks_10',  'Falante Assíduo',   'Tenha 10 conversas com o hupy',  'Hablante Habitual', 'Ten 10 conversaciones con hupy'),
+('talks_25',  'Voz Confiante',     'Tenha 25 conversas com o hupy',  'Voz Segura',        'Ten 25 conversaciones con hupy'),
+('talks_50',  'Papo Natural',      'Tenha 50 conversas com o hupy',  'Charla Natural',    'Ten 50 conversaciones con hupy'),
+('talks_100', 'Nunca em Silêncio', 'Tenha 100 conversas com o hupy', 'Nunca en Silencio', 'Ten 100 conversaciones con hupy'),
 ('lines_10',   'Dez Falas',        'Troque 10 mensagens com seu tutor',   'Diez Líneas',        'Intercambia 10 mensajes con tu tutor'),
 ('lines_50',   'Cinquenta Falas',  'Troque 50 mensagens com seu tutor',   'Cincuenta Líneas',   'Intercambia 50 mensajes con tu tutor'),
 ('lines_100',  'Cem Falas',        'Troque 100 mensagens com seu tutor',  'Cien Líneas',        'Intercambia 100 mensajes con tu tutor'),

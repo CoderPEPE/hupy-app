@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Huppy planet art generator.
+hupy planet art generator.
 
 Renders 8 solar-system planets x 4 mastery levels as 1024x1024 PNGs into
 mobile/assets/planets/{slug}/level-{N}.png, matching src/planets/planetLevels.ts.

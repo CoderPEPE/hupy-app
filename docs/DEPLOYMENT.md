@@ -1,6 +1,6 @@
-# Deploying Huppy to production
+# Deploying hupy to production
 
-This guide covers running the Huppy backend in production and pointing the
+This guide covers running the hupy backend in production and pointing the
 mobile app at it. It assumes you are deploying the API behind an HTTPS
 reverse proxy on a single host.
 
@@ -22,7 +22,7 @@ env — see `backend/src/config.rs` for the authoritative list).
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `DATABASE_URL` | **yes** | — | Postgres connection string, e.g. `postgres://user:pass@host:5432/huppy`. |
+| `DATABASE_URL` | **yes** | — | Postgres connection string, e.g. `postgres://user:pass@host:5432/hupy`. |
 | `JWT_SECRET` | **yes** | — | HMAC secret for JWTs. Generate with `openssl rand -hex 32`. A value under 16 chars logs a warning on boot. Rotating it invalidates every session. |
 | `OPENAI_API_KEY` | no | empty | Needed for Realtime voice sessions and TTS. The key never leaves the server. |
 | `PORT` | no | `3000` | Port the HTTP server binds (all interfaces). |
@@ -70,7 +70,7 @@ database healthcheck, and restarts the API unless stopped. Health check:
 ```bash
 cd backend
 cargo build --release
-DATABASE_URL=... JWT_SECRET=... ./target/release/huppy-backend
+DATABASE_URL=... JWT_SECRET=... ./target/release/hupy-backend
 ```
 
 Run it under a process supervisor (systemd, supervisord, a container
@@ -130,8 +130,8 @@ balancer). Two things matter:
 ## 6. Observability
 
 - Structured logs go to stdout via `tracing` (level controlled by
-  `RUST_LOG`, default `huppy_backend=debug,tower_http=debug` — use
-  `RUST_LOG=huppy_backend=info` in production to cut the noise).
+  `RUST_LOG`, default `hupy_backend=debug,tower_http=debug` — use
+  `RUST_LOG=hupy_backend=info` in production to cut the noise).
 - Every request is traced by `TraceLayer` (method, path, status, latency),
   which is all most deployments need; ship stdout to your log collector.
 - Internal errors are logged in full server-side but returned to clients as
@@ -143,7 +143,7 @@ balancer). Two things matter:
 - [ ] `JWT_SECRET` is a long random value, never the default, never committed.
 - [ ] Access tokens are short-lived and refresh tokens rotate (this is the default; the `ACCESS_TOKEN_TTL_SECS` / `REFRESH_TOKEN_TTL_SECS` env vars control it).
 - [ ] The refresh-token table lives in the same Postgres as everything else — if you back up the DB, the tokens (as hashes) come along. Sessions are server-revocable via `/api/auth/logout`.
-- [ ] The mobile app encrypts its stored auth tokens with a device-bound key: the AES key lives in the iOS Keychain / Android Keystore with `WHEN_UNLOCKED_THIS_DEVICE_ONLY` (readable only while unlocked), and Android auto-backup is disabled (`android.allowBackup: false`), so neither iCloud nor Android backup can restore a session to another device. On iOS the keychain items are pinned to an explicit access group (`$(AppIdentifierPrefix)com.conjuntos.huppy` via `ios.entitlements`), so the key survives re-signing and certificate/profile rotation within the same team — a team change (different AppIdentifierPrefix) moves keychain items and forces re-login, which no entitlement can bridge. On reinstall the old key is never reused: the MMKV file dies with the app container while the iOS Keychain item can survive uninstall, and app boot detects that stale key and rotates to a fresh one. Support can also force a re-key on demand via the exported `rotateSecureStorageKey()` (re-encrypts the live store under a fresh key while preserving the session). A backup that keeps the MMKV file but loses the keychain item forces a fresh login rather than a plaintext downgrade.
+- [ ] The mobile app encrypts its stored auth tokens with a device-bound key: the AES key lives in the iOS Keychain / Android Keystore with `WHEN_UNLOCKED_THIS_DEVICE_ONLY` (readable only while unlocked), and Android auto-backup is disabled (`android.allowBackup: false`), so neither iCloud nor Android backup can restore a session to another device. On iOS the keychain items are pinned to an explicit access group (`$(AppIdentifierPrefix)com.hupy.hupy` via `ios.entitlements`), so the key survives re-signing and certificate/profile rotation within the same team — a team change (different AppIdentifierPrefix) moves keychain items and forces re-login, which no entitlement can bridge. On reinstall the old key is never reused: the MMKV file dies with the app container while the iOS Keychain item can survive uninstall, and app boot detects that stale key and rotates to a fresh one. Support can also force a re-key on demand via the exported `rotateSecureStorageKey()` (re-encrypts the live store under a fresh key while preserving the session). A backup that keeps the MMKV file but loses the keychain item forces a fresh login rather than a plaintext downgrade.
 - [ ] `OPENAI_API_KEY` only exists server-side.
 - [ ] The API is only reachable over HTTPS in production.
 - [ ] `CORS_ORIGIN` is set if a web client exists.

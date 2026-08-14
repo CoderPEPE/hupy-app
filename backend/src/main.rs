@@ -5,7 +5,7 @@
 //! lib lets the integration tests in `tests/` exercise the exact same app.
 
 use diesel_migrations::MigrationHarness;
-use huppy_backend::{build_router, config, db, state::AppState, MIGRATIONS};
+use hupy_backend::{build_router, config, db, state::AppState, MIGRATIONS};
 use std::net::SocketAddr;
 
 #[tokio::main]
@@ -15,7 +15,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "huppy_backend=debug,tower_http=debug".into()),
+                .unwrap_or_else(|_| "hupy_backend=debug,tower_http=debug".into()),
         )
         .init();
 
@@ -41,7 +41,7 @@ async fn main() {
         .await
         .unwrap();
     tracing::info!(
-        "huppy backend listening on {}",
+        "hupy backend listening on {}",
         listener.local_addr().unwrap()
     );
     // Provide ConnectInfo (client socket) for the rate-limiting middleware.

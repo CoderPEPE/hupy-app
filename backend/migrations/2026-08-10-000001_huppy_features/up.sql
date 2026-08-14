@@ -1,4 +1,4 @@
--- Huppy learning system: planets, sentences, progress, conversations,
+-- hupy learning system: planets, sentences, progress, conversations,
 -- corrections, flashcards with spaced repetition.
 
 CREATE TABLE planets (

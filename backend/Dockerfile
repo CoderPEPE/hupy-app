@@ -36,12 +36,12 @@ FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libpq5 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 10001 huppy
+    && useradd --create-home --uid 10001 hupy
 
-USER huppy
-WORKDIR /home/huppy
+USER hupy
+WORKDIR /home/hupy
 
-COPY --from=builder --chown=huppy:huppy /app/target/release/huppy-backend /usr/local/bin/huppy-backend
+COPY --from=builder --chown=hupy:hupy /app/target/release/hupy-backend /usr/local/bin/hupy-backend
 
 EXPOSE 3000
 
@@ -49,4 +49,4 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fsS http://localhost:3000/health >/dev/null || exit 1
 
-CMD ["huppy-backend"]
+CMD ["hupy-backend"]

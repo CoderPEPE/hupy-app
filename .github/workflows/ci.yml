@@ -16,18 +16,18 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: huppy
-          POSTGRES_PASSWORD: huppy
-          POSTGRES_DB: huppy_test
+          POSTGRES_USER: hupy
+          POSTGRES_PASSWORD: hupy
+          POSTGRES_DB: hupy_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U huppy -d huppy_test"
+          --health-cmd "pg_isready -U hupy -d hupy_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      TEST_DATABASE_URL: postgres://huppy:huppy@localhost:5432/huppy_test
+      TEST_DATABASE_URL: postgres://hupy:hupy@localhost:5432/hupy_test
       RUST_BACKTRACE: "1"
     steps:
       - uses: actions/checkout@v4

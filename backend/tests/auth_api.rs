@@ -5,7 +5,7 @@ mod common;
 
 use common::{app, register, request, unique_email, Router, TEST_SECRET};
 use diesel::prelude::*;
-use huppy_backend::jwt;
+use hupy_backend::jwt;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -450,21 +450,21 @@ async fn rotate_returns_expired_for_a_past_dated_token() {
     let user_id = Uuid::parse_str(register_body["user"]["id"].as_str().unwrap()).unwrap();
 
     let raw = "rotate-expired-arm-token-000000000000000000000000";
-    let hash = huppy_backend::repositories::refresh_tokens::hash_token(raw);
-    let new_hash = huppy_backend::repositories::refresh_tokens::hash_token("brand-new");
+    let hash = hupy_backend::repositories::refresh_tokens::hash_token(raw);
+    let new_hash = hupy_backend::repositories::refresh_tokens::hash_token("brand-new");
 
-    let outcome = huppy_backend::db::run_db(common::pool(), move |conn| {
-        conn.transaction::<_, huppy_backend::errors::AppError, _>(|conn| {
-            diesel::insert_into(huppy_backend::schema::refresh_tokens::table)
+    let outcome = hupy_backend::db::run_db(common::pool(), move |conn| {
+        conn.transaction::<_, hupy_backend::errors::AppError, _>(|conn| {
+            diesel::insert_into(hupy_backend::schema::refresh_tokens::table)
                 .values((
-                    huppy_backend::schema::refresh_tokens::user_id.eq(user_id),
-                    huppy_backend::schema::refresh_tokens::token_hash.eq(&hash),
-                    huppy_backend::schema::refresh_tokens::family_id.eq(Uuid::new_v4()),
-                    huppy_backend::schema::refresh_tokens::expires_at
+                    hupy_backend::schema::refresh_tokens::user_id.eq(user_id),
+                    hupy_backend::schema::refresh_tokens::token_hash.eq(&hash),
+                    hupy_backend::schema::refresh_tokens::family_id.eq(Uuid::new_v4()),
+                    hupy_backend::schema::refresh_tokens::expires_at
                         .eq(chrono::Utc::now() - chrono::Duration::minutes(1)),
                 ))
                 .execute(conn)?;
-            huppy_backend::repositories::refresh_tokens::rotate_on_conn(
+            hupy_backend::repositories::refresh_tokens::rotate_on_conn(
                 conn,
                 &hash,
                 &new_hash,
@@ -478,7 +478,7 @@ async fn rotate_returns_expired_for_a_past_dated_token() {
     assert!(
         matches!(
             outcome,
-            huppy_backend::repositories::refresh_tokens::RotateOutcome::Expired
+            hupy_backend::repositories::refresh_tokens::RotateOutcome::Expired
         ),
         "expired token must be rejected as Expired, got: {outcome:?}"
     );
@@ -503,8 +503,8 @@ async fn refresh_with_an_expired_token_is_unauthorized() {
 
     // Issue a token directly with a past expiry (the API never does this).
     let raw = "known-expired-token-0000000000000000000000000000";
-    let hash = huppy_backend::repositories::refresh_tokens::hash_token(raw);
-    huppy_backend::repositories::refresh_tokens::issue(
+    let hash = hupy_backend::repositories::refresh_tokens::hash_token(raw);
+    hupy_backend::repositories::refresh_tokens::issue(
         common::pool(),
         user_id,
         Uuid::new_v4(),

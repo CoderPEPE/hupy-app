@@ -14,7 +14,7 @@ type Props = {
 
 /**
  * Progress bar with a horizontal gradient fill (purple -> blue), matching the
- * Huppy planets design. Measures its own width so the SVG fill can be exact.
+ * hupy planets design. Measures its own width so the SVG fill can be exact.
  */
 export function GradientBar({
   value,

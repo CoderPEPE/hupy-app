@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Huppy — Higgsfield MCP planet art prompts
+# hupy — Higgsfield MCP planet art prompts
 #
 # The app ships procedural planet PNGs (scripts/generate-planet-art.py) under
 # mobile/assets/planets/{slug}/level-{1-4}.png. Once the Higgsfield MCP is
@@ -18,7 +18,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-echo "Huppy Higgsfield prompts — save outputs to: $ROOT/mobile/assets/planets/{slug}/level-{N}.png"
+echo "hupy Higgsfield prompts — save outputs to: $ROOT/mobile/assets/planets/{slug}/level-{N}.png"
 echo
 
 PROMPTS=(

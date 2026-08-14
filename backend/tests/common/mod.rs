@@ -2,7 +2,7 @@
 //!
 //! The suite drives the real `build_router` in-process against a disposable
 //! Postgres database. Point `TEST_DATABASE_URL` at a scratch server/database
-//! you don't care about (e.g. `postgres://localhost/huppy_test`) — never at a
+//! you don't care about (e.g. `postgres://localhost/hupy_test`) — never at a
 //! database with real data.
 //!
 //! Every test binary owns its own scratch database: cargo runs the
@@ -25,10 +25,10 @@ use diesel::connection::SimpleConnection;
 use diesel::pg::PgConnection;
 use diesel::prelude::*;
 use diesel_migrations::MigrationHarness;
-use huppy_backend::config::Config;
-use huppy_backend::db::{establish_pool, DbPool};
-use huppy_backend::state::AppState;
-use huppy_backend::MIGRATIONS;
+use hupy_backend::config::Config;
+use hupy_backend::db::{establish_pool, DbPool};
+use hupy_backend::state::AppState;
+use hupy_backend::MIGRATIONS;
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::OnceLock;
@@ -52,7 +52,7 @@ pub fn pool() -> &'static DbPool {
     POOL.get_or_init(|| {
         let base = std::env::var("TEST_DATABASE_URL").expect(
             "TEST_DATABASE_URL must point at a disposable Postgres server \
-             (e.g. postgres://localhost/huppy_test) — never a database with real data",
+             (e.g. postgres://localhost/hupy_test) — never a database with real data",
         );
         let url = binary_database_url(&base);
         ensure_database(&base, &url);
@@ -85,7 +85,7 @@ fn swap_database(url: &str, db: &str) -> String {
 }
 
 /// The scratch database for this test binary: `<base>_<binary-stem>`, e.g.
-/// `huppy_test_planets_api`. Cargo appends a build hash to the executable
+/// `hupy_test_planets_api`. Cargo appends a build hash to the executable
 /// name (`planets_api-1a2b3c…`), so the stem is everything before the first
 /// `-`. Only safe characters (letters, digits, `_`) ever reach the SQL.
 fn binary_database_url(base: &str) -> String {
@@ -170,7 +170,7 @@ pub fn app_with_limits(auth_rate_max: usize, tts_rate_max: usize, write_rate_max
         refresh_token_ttl_secs: 30 * 24 * 3600,
     };
     let state = AppState::new(config, pool().clone());
-    huppy_backend::build_router(state)
+    hupy_backend::build_router(state)
 }
 
 /// Registers a fresh user and returns their bearer token.

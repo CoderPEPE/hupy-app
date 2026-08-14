@@ -3,7 +3,7 @@
 set -e
 cd "$(dirname "$0")/.."
 TARGET="${1:-2026-08-12-000002_sixty_planets}"
-DB="huppy_mig_check"
+DB="hupy_mig_check"
 
 dropdb --if-exists "$DB" >/dev/null 2>&1 || true
 createdb "$DB"

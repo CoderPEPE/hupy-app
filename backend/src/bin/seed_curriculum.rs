@@ -1,7 +1,7 @@
 //! Writes the ten-module curriculum of every planet into the database.
 //!
 //! The sequence itself is not the model's to invent — it lives in
-//! [`huppy_backend::services::curriculum`]: which three high-frequency verbs
+//! [`hupy_backend::services::curriculum`]: which three high-frequency verbs
 //! each planet drills, and what each of its ten modules does with them (verb 1,
 //! verb 2, verb 3, mix, past, future, questions, negation, dialogue, review).
 //! This binary hands that plan to the chat model and asks only for the part a
@@ -21,9 +21,9 @@
 //! `--force`, and a planet whose model call fails is left untouched for the
 //! next run.
 
-use huppy_backend::models::{Planet, PlanetLesson};
-use huppy_backend::services::curriculum;
-use huppy_backend::{config, db, repositories, services};
+use hupy_backend::models::{Planet, PlanetLesson};
+use hupy_backend::services::curriculum;
+use hupy_backend::{config, db, repositories, services};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -106,7 +106,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "seed_curriculum=info,huppy_backend=warn".into()),
+                .unwrap_or_else(|_| "seed_curriculum=info,hupy_backend=warn".into()),
         )
         .init();
 

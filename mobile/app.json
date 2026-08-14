@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Huppy",
-    "slug": "huppy",
+    "name": "hupy",
+    "slug": "hupy",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -9,20 +9,16 @@
     "ios": {
       "supportsTablet": true,
       "entitlements": {
-        "keychain-access-groups": [
-          "$(AppIdentifierPrefix)com.conjuntos.huppy"
-        ]
+        "keychain-access-groups": ["$(AppIdentifierPrefix)com.hupy.hupy"]
       },
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Huppy uses the microphone so you can practice speaking English with your AI tutor.",
-        "UIBackgroundModes": [
-          "audio"
-        ],
+        "NSMicrophoneUsageDescription": "hupy uses the microphone so you can practice speaking English with your AI tutor.",
+        "UIBackgroundModes": ["audio"],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
       },
-      "bundleIdentifier": "com.conjuntos.huppy"
+      "bundleIdentifier": "com.hupy.hupy"
     },
     "android": {
       "allowBackup": false,
@@ -33,10 +29,8 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": [
-        "RECORD_AUDIO"
-      ],
-      "package": "com.conjuntos.huppy"
+      "permissions": ["RECORD_AUDIO"],
+      "package": "com.hupy.hupy"
     },
     "web": {
       "favicon": "./assets/favicon.png"

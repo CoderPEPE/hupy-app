@@ -24,8 +24,8 @@
 //! Re-runnable: planets that already have a story are skipped unless
 //! `--force`, so an interrupted run continues where it stopped.
 
-use huppy_backend::models::Planet;
-use huppy_backend::{config, db, repositories, services};
+use hupy_backend::models::Planet;
+use hupy_backend::{config, db, repositories, services};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -107,7 +107,7 @@ async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "seed_stories=info,huppy_backend=warn".into()),
+                .unwrap_or_else(|_| "seed_stories=info,hupy_backend=warn".into()),
         )
         .init();
 

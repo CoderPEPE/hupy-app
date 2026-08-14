@@ -527,7 +527,7 @@ async fn planet_detail(
     }))
 }
 
-/// Returns the scripted pedagogical lesson for a planet (the Huppy cycle:
+/// Returns the scripted pedagogical lesson for a planet (the hupy cycle:
 /// teach -> repeat -> question -> correction -> review -> praise).
 async fn planet_lesson(
     State(state): State<AppState>,
