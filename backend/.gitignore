@@ -1,3 +1,6 @@
 /target
-.env
+# .env* — plain `.env` missed siblings like `.env copy`, which is how a real
+# OpenAI key got committed once.
+.env*
+!.env.example
 *.log
