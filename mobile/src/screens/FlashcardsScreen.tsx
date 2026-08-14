@@ -12,9 +12,6 @@ import {
   Volume2,
 } from 'lucide-react-native';
 
-function CheckCircle2Icon() {
-  return <CheckCircle2 size={32} color={colors.success} />;
-}
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle as SvgCircle, Path as SvgPath } from 'react-native-svg';
@@ -391,9 +388,14 @@ export function FlashcardsScreen() {
   // A deck is "all", a planet, or the pending module's own set.
   const inDeck = (c: (typeof cards)[number]) =>
     deck === 'all' || c.planet_id === deck || c.lesson_id === deck;
-  const deckCards = cards.filter((c) => inDeck(c) && (showLearned ? !c.due : c.due));
-  const dueCount = cards.filter((c) => inDeck(c) && c.due).length;
   const dueTotal = cards.filter((c) => c.due).length;
+  const dueCount = cards.filter((c) => inDeck(c) && c.due).length;
+  const learnedCount = cards.filter((c) => inDeck(c) && !c.due).length;
+  // Opening a deck with nothing due must never be a dead end: default to the
+  // Learned tab so the learner can still browse what they've studied instead
+  // of staring at a "caught up" screen with nowhere to go.
+  const showLearnedActive = showLearned || dueCount === 0;
+  const deckCards = cards.filter((c) => inDeck(c) && (showLearnedActive ? !c.due : c.due));
   const planetName = (id: string | null) => {
     if (!id) return t('flashcards.allCards');
     const asPlanet = planets.find((p) => p.id === id);
@@ -486,10 +488,17 @@ export function FlashcardsScreen() {
                 />
               </View>
             </View>
-            <View style={styles.studyBtn}>
-              <Text style={styles.studyBtnText}>{t('flashcards.studyNow')}</Text>
-              <ChevronRight size={16} color={colors.primary} />
-            </View>
+            {dueTotal > 0 ? (
+              <View style={styles.studyBtn}>
+                <Text style={styles.studyBtnText}>{t('flashcards.studyNow')}</Text>
+                <ChevronRight size={16} color={colors.primary} />
+              </View>
+            ) : (
+              <View style={styles.caughtUpBtn}>
+                <CheckCircle2 size={14} color={colors.textOnPrimary} />
+                <Text style={styles.caughtUpBtnText}>{t('flashcards.caughtUpTitle')}</Text>
+              </View>
+            )}
           </Card>
 
           {planets.map((planet) => {
@@ -576,7 +585,9 @@ export function FlashcardsScreen() {
   }
 
   if (!card) {
-    // The deck has cards but nothing is due right now.
+    // The deck is truly empty — nothing to review AND nothing learned yet.
+    // (A deck with cards but nothing due never gets here: it opens on the
+    // Learned tab via showLearnedActive.)
     return (
       <View style={styles.screen}>
         <ScreenHeader
@@ -585,9 +596,9 @@ export function FlashcardsScreen() {
           right={<StreakXpBar />}
         />
         <View style={styles.centerState}>
-          <CheckCircle2Icon />
-          <Text style={styles.centerTitle}>{t('flashcards.caughtUpTitle')}</Text>
-          <Text style={styles.centerText}>{t('flashcards.caughtUpBody')}</Text>
+          <BookOpen size={32} color={colors.primary} />
+          <Text style={styles.centerTitle}>{t('flashcards.emptyTitle')}</Text>
+          <Text style={styles.centerText}>{t('flashcards.emptyBody')}</Text>
         </View>
         <AppTabBar />
       </View>
@@ -620,29 +631,31 @@ export function FlashcardsScreen() {
       <ScrollView style={styles.sheet} contentContainerStyle={styles.sheetContent} showsVerticalScrollIndicator={false}>
         <View style={styles.reviewToggleRow}>
           <Pressable
-            style={[styles.reviewToggleBtn, !showLearned && styles.reviewToggleBtnActive]}
+            disabled={dueCount === 0}
+            style={[styles.reviewToggleBtn, !showLearnedActive && styles.reviewToggleBtnActive]}
             onPress={() => {
               setShowLearned(false);
               setIndex(0);
               setFlipped(false);
             }}
           >
-            <Text style={[styles.reviewToggleText, !showLearned && styles.reviewToggleTextActive]}>
+            <Text style={[styles.reviewToggleText, !showLearnedActive && styles.reviewToggleTextActive]}>
               {t('flashcards.toReview')}
             </Text>
-            <View style={[styles.countBadge, !showLearned && styles.countBadgeActive]}>
-              <Text style={[styles.countBadgeText, !showLearned && styles.countBadgeTextActive]}>{dueCount}</Text>
+            <View style={[styles.countBadge, !showLearnedActive && styles.countBadgeActive]}>
+              <Text style={[styles.countBadgeText, !showLearnedActive && styles.countBadgeTextActive]}>{dueCount}</Text>
             </View>
           </Pressable>
           <Pressable
-            style={[styles.reviewToggleBtn, showLearned && styles.reviewToggleBtnActive]}
+            disabled={learnedCount === 0}
+            style={[styles.reviewToggleBtn, showLearnedActive && styles.reviewToggleBtnActive]}
             onPress={() => {
               setShowLearned(true);
               setIndex(0);
               setFlipped(false);
             }}
           >
-            <Text style={[styles.reviewToggleText, showLearned && styles.reviewToggleTextActive]}>
+            <Text style={[styles.reviewToggleText, showLearnedActive && styles.reviewToggleTextActive]}>
               {t('flashcards.learned')}
             </Text>
           </Pressable>
@@ -860,6 +873,23 @@ const styles = StyleSheet.create({
   studyBtnText: {
     ...typography.label,
     color: colors.primary,
+  },
+  // Shown on the hero card instead of "Study now" when every card is caught
+  // up — a status, not an action, so the learner isn't lured into a deck
+  // with nothing to review.
+  caughtUpBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: radius.round,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  caughtUpBtnText: {
+    ...typography.caption,
+    fontWeight: '800',
+    color: colors.textOnPrimary,
   },
   deckCard: {
     marginBottom: spacing.sm,

@@ -87,13 +87,17 @@ export function LanguagePickerScreen({ onDone }: { onDone: () => void }) {
 
   /** Persists the (base, target) pair to storage and, when logged in, to the
    * backend so the next planet list is served from the new course. Best
-   * effort — a network failure must not block the UI. */
-  const selectTarget = (code: string) => {
+   * effort — a network failure must not block the UI.
+   * `base` is passed explicitly rather than read from `speak`: changing the
+   * base calls this from `selectSpeak` before the `setSpeak` render lands, so
+   * the closure would still hold the previous base — the account would keep
+   * the old course and snap the UI locale back to it. */
+  const selectTarget = (code: string, base: SpeakCode = speak) => {
     setTarget(code as SpeakCode);
-    storage.set(StorageKeys.baseLanguage, speak);
+    storage.set(StorageKeys.baseLanguage, base);
     storage.set(StorageKeys.targetLanguage, code);
     if (useAuthStore.getState().token) {
-      useAuthStore.getState().setLanguage(code, speak).catch(() => {});
+      useAuthStore.getState().setLanguage(code, base).catch(() => {});
     }
   };
 
@@ -104,7 +108,7 @@ export function LanguagePickerScreen({ onDone }: { onDone: () => void }) {
     // Optimistic: switch the interface now, the account call confirms it.
     const nextLocale = localeForBaseLanguage(next);
     if (nextLocale) setLocale(nextLocale);
-    selectTarget(initialTarget(next));
+    selectTarget(initialTarget(next), next);
   };
 
   return (
