@@ -9,11 +9,15 @@
     "ios": {
       "supportsTablet": true,
       "entitlements": {
-        "keychain-access-groups": ["$(AppIdentifierPrefix)com.hupy.hupy"]
+        "keychain-access-groups": [
+          "$(AppIdentifierPrefix)com.hupy.hupy"
+        ]
       },
       "infoPlist": {
         "NSMicrophoneUsageDescription": "hupy uses the microphone so you can practice speaking English with your AI tutor.",
-        "UIBackgroundModes": ["audio"],
+        "UIBackgroundModes": [
+          "audio"
+        ],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
@@ -29,7 +33,9 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "permissions": ["RECORD_AUDIO"],
+      "permissions": [
+        "RECORD_AUDIO"
+      ],
       "package": "com.hupy.hupy"
     },
     "web": {
@@ -46,6 +52,12 @@
       ],
       "expo-secure-store",
       "expo-dev-client"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "bddea073-ba95-4095-96c8-4d08f362f20b"
+      }
+    },
+    "owner": "esophk"
   }
 }
