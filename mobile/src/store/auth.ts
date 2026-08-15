@@ -181,6 +181,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   signInWithGoogle: async () => {
+    console.log('[gdbg] signInWithGoogle entered, webClientId=', JSON.stringify(GOOGLE_WEB_CLIENT_ID));
+    try {
+      configureGoogle();
+      console.log('[gdbg] configured ok');
+      if (Platform.OS === 'android') {
+        const ps = await GoogleSignin.hasPlayServices();
+        console.log('[gdbg] hasPlayServices =', ps);
+      }
+      const r = await GoogleSignin.signIn();
+      console.log('[gdbg] signIn returned', JSON.stringify(r));
+    } catch (e) {
+      console.log('[gdbg] threw:', e instanceof Error ? e.message : String(e), (e as { code?: string })?.code);
+    }
     configureGoogle();
     // Android only: turns a missing/outdated Play Services into the standard
     // update prompt instead of an opaque native rejection.
