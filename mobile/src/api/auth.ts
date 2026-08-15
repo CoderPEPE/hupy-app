@@ -37,6 +37,16 @@ export function login(email: string, password: string) {
   });
 }
 
+/** Exchanges a Google ID token for a session, creating the account on first
+ * sign-in. The course pair travels along and is only used for that first
+ * sign-in — an existing account keeps the course it already has. */
+export function googleLogin(idToken: string, baseLanguage?: string, language?: string) {
+  return apiRequest<AuthResponse>('/api/auth/google', {
+    method: 'POST',
+    body: { id_token: idToken, base_language: baseLanguage, language },
+  });
+}
+
 /** Exchanges the stored refresh token for a fresh access JWT + next refresh
  * token. The presented token is single-use: this response is the only
  * successor. */

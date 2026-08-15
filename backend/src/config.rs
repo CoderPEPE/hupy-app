@@ -14,6 +14,11 @@ pub struct Config {
     pub jwt_secret: String,
     /// OpenAI API key (empty when not configured).
     pub openai_api_key: String,
+    /// Every OAuth client ID that may appear in the `aud` of a Google ID
+    /// token we accept — the web, iOS and Android clients of this app. The
+    /// audience differs by platform, so all of them are listed; an empty
+    /// list disables Google sign-in rather than accepting anything.
+    pub google_client_ids: Vec<String>,
     /// Port the HTTP server binds to.
     pub port: u16,
     /// When set, CORS allows only this origin; unset means allow-all (fine
@@ -68,6 +73,16 @@ impl Config {
         }
 
         let openai_api_key = env::var("OPENAI_API_KEY").unwrap_or_default();
+        // Comma-separated: "web-id.apps.googleusercontent.com,ios-id.apps…".
+        let google_client_ids = env::var("GOOGLE_CLIENT_IDS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .collect::<Vec<_>>();
+        if google_client_ids.is_empty() {
+            tracing::warn!("GOOGLE_CLIENT_IDS is unset — Google sign-in will be rejected");
+        }
         let port = env::var("PORT")
             .ok()
             .and_then(|p| p.parse().ok())
@@ -124,6 +139,7 @@ impl Config {
             database_url,
             jwt_secret,
             openai_api_key,
+            google_client_ids,
             port,
             cors_origin,
             tts_model,
@@ -152,10 +168,11 @@ mod tests {
     // they must never run concurrently with each other.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    const ALL_VARS: [&str; 17] = [
+    const ALL_VARS: [&str; 18] = [
         "DATABASE_URL",
         "JWT_SECRET",
         "OPENAI_API_KEY",
+        "GOOGLE_CLIENT_IDS",
         "PORT",
         "CORS_ORIGIN",
         "TTS_MODEL",
@@ -221,6 +238,7 @@ mod tests {
                 let c = Config::from_env().unwrap();
                 assert_eq!(c.port, 3000);
                 assert_eq!(c.openai_api_key, "");
+                assert!(c.google_client_ids.is_empty());
                 assert_eq!(c.cors_origin, None);
                 assert_eq!(c.tts_model, "gpt-4o-mini-tts");
                 assert_eq!(c.tts_voice, "marin");
@@ -275,6 +293,24 @@ mod tests {
                 assert_eq!(c.tts_cache_max_age_days, 14);
                 assert_eq!(c.access_token_ttl_secs, 300);
                 assert_eq!(c.refresh_token_ttl_secs, 86400);
+            },
+        );
+    }
+
+    #[test]
+    fn google_client_ids_split_on_commas_and_drop_blanks() {
+        with_env(
+            || {
+                env::set_var("DATABASE_URL", "postgres://localhost/hupy");
+                env::set_var("JWT_SECRET", "0123456789abcdef0123456789abcdef");
+                // Trailing comma and padding are what a hand-edited .env
+                // actually looks like; neither may become an empty audience
+                // that matches a token with no `aud`.
+                env::set_var("GOOGLE_CLIENT_IDS", " web.apps , ios.apps ,");
+            },
+            || {
+                let c = Config::from_env().unwrap();
+                assert_eq!(c.google_client_ids, vec!["web.apps", "ios.apps"]);
             },
         );
     }

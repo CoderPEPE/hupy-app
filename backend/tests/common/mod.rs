@@ -153,6 +153,7 @@ pub fn app_with_limits(auth_rate_max: usize, tts_rate_max: usize, write_rate_max
         database_url: String::new(), // the router never connects directly
         jwt_secret: TEST_SECRET.into(),
         openai_api_key: String::new(),
+        google_client_ids: Vec::new(),
         port: 0,
         cors_origin: None,
         tts_model: "gpt-4o-mini-tts".into(),

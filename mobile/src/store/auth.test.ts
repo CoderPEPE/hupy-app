@@ -11,6 +11,7 @@ import { getSecureStorage, initSecureStorage, SecureKeys, storage, StorageKeys }
 jest.mock('../api/auth', () => ({
   login: jest.fn(),
   register: jest.fn(),
+  googleLogin: jest.fn(),
   me: jest.fn(),
   refresh: jest.fn(),
   logout: jest.fn().mockResolvedValue(undefined),
@@ -19,8 +20,22 @@ jest.mock('../api/auth', () => ({
   setName: jest.fn(),
 }));
 
+// The Google client IDs come from EXPO_PUBLIC_* env vars that only exist in
+// a real build; without them configureGoogle() refuses to run at all.
+jest.mock('../config', () => ({
+  API_BASE_URL: 'http://localhost:3000',
+  GOOGLE_WEB_CLIENT_ID: 'web-client-id',
+  GOOGLE_IOS_CLIENT_ID: 'ios-client-id',
+}));
+
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const authApi = require('../api/auth') as Record<string, jest.Mock>;
+// The native SDK is stubbed globally in jest.setup.js; this handle lets a
+// test script the sheet's outcome.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { GoogleSignin } = require('@react-native-google-signin/google-signin') as {
+  GoogleSignin: Record<string, jest.Mock>;
+};
 const mockApi = <T extends (...args: never[]) => unknown>(fn: jest.Mock): jest.MockedFunction<T> =>
   fn as unknown as jest.MockedFunction<T>;
 
@@ -170,6 +185,52 @@ describe('signIn', () => {
     // Nothing half-written: a failed sign-in leaves no session behind.
     expect(getSecureStorage().getString(SecureKeys.authToken)).toBeNull();
     expect(getSecureStorage().getString(SecureKeys.refreshToken)).toBeNull();
+    expect(useAuthStore.getState().token).toBeNull();
+  });
+});
+
+describe('signInWithGoogle', () => {
+  /** Scripts the native sheet returning a signed-in account. */
+  const sheetReturns = (idToken: string | null) =>
+    GoogleSignin.signIn.mockResolvedValue({ type: 'success', data: { idToken } });
+
+  it('exchanges the ID token for a session and stores the pair', async () => {
+    storage.set(StorageKeys.baseLanguage, 'es');
+    storage.set(StorageKeys.targetLanguage, 'pt');
+    sheetReturns('google-id-token');
+    mockApi<() => Promise<WireAuthResponse>>(authApi.googleLogin).mockResolvedValue({
+      token: 'token-g',
+      refresh_token: 'refresh-g',
+      user: user({ base_language: 'es', language: 'pt', name: 'Ana' }),
+    });
+
+    await expect(useAuthStore.getState().signInWithGoogle()).resolves.toBe(true);
+
+    expect(authApi.googleLogin).toHaveBeenCalledWith('google-id-token', 'es', 'pt');
+    expect(useAuthStore.getState().token).toBe('token-g');
+    expect(getSecureStorage().getString(SecureKeys.refreshToken)).toBe('refresh-g');
+  });
+
+  /// Dismissing the sheet is a normal thing to do — it must resolve quietly
+  /// rather than reject, or the login screen shows an error for it.
+  it('resolves false without touching the backend when the sheet is dismissed', async () => {
+    GoogleSignin.signIn.mockResolvedValue({ type: 'cancelled', data: null });
+
+    await expect(useAuthStore.getState().signInWithGoogle()).resolves.toBe(false);
+
+    expect(authApi.googleLogin).not.toHaveBeenCalled();
+    expect(useAuthStore.getState().token).toBeNull();
+    expect(getSecureStorage().getString(SecureKeys.authToken)).toBeNull();
+  });
+
+  /// A success with no ID token means the webClientId doesn't match the
+  /// platform client's project. Nothing to send, so it must not look signed in.
+  it('fails loudly when Google returns no ID token', async () => {
+    sheetReturns(null);
+
+    await expect(useAuthStore.getState().signInWithGoogle()).rejects.toThrow(/ID token/i);
+
+    expect(authApi.googleLogin).not.toHaveBeenCalled();
     expect(useAuthStore.getState().token).toBeNull();
   });
 });

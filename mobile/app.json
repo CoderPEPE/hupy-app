@@ -50,7 +50,13 @@
         }
       ],
       "expo-secure-store",
-      "expo-dev-client"
+      "expo-dev-client",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.156810114249-lvsu6v2tath396b9a5f44v35bk3rlfff"
+        }
+      ]
     ],
     "extra": {
       "eas": {

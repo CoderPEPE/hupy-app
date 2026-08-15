@@ -14,3 +14,16 @@ const DEV_BASE_URL = Platform.select({
  * at bundle time, so this needs a rebuild after changing it.
  */
 export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? DEV_BASE_URL;
+
+/**
+ * Google Sign-In OAuth client IDs. Not secrets — every OAuth client ID is
+ * shipped inside the app binary by definition; the security boundary is the
+ * backend checking the ID token's `aud` against its own allowlist.
+ *
+ * `webClientId` is what makes Google return an ID token at all, so an empty
+ * value means the Google button cannot work. The iOS client ID is also
+ * written (in reversed form) into app.json's `iosUrlScheme` — the two must
+ * name the same OAuth client or iOS sign-in fails at the redirect.
+ */
+export const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '';
+export const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '';

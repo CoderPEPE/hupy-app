@@ -21,6 +21,7 @@ pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/register", post(register))
         .route("/login", post(login))
+        .route("/google", post(google))
         .route("/refresh", post(refresh))
         .route("/logout", post(logout))
         .route("/me", get(me))
@@ -274,6 +275,93 @@ async fn login(
         user.id,
         pair.family_id,
         &pair.refresh_hash,
+        pair.expires_at,
+    )
+    .await?;
+
+    Ok(Json(AuthResponse {
+        token: pair.access,
+        refresh_token: pair.raw_refresh,
+        user: user.into(),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GoogleAuthRequest {
+    /// The ID token the native Google sheet handed the app.
+    pub id_token: String,
+    /// Course choice, used only when this is a first sign-in (the app sends
+    /// what the pre-login language picker chose). Existing accounts keep the
+    /// course they already have.
+    pub language: Option<String>,
+    pub base_language: Option<String>,
+}
+
+/// Signs in with a Google ID token, creating the account on first use.
+///
+/// Accounts are matched by email, which is safe *because* the token's
+/// `email_verified` claim is checked: Google has proven the holder owns that
+/// mailbox. The converse is not true of `/register`, which never verifies
+/// email — so a password account claimed with someone else's address before
+/// they first sign in with Google would be joined here. Closing that needs
+/// email verification on registration, which this endpoint cannot do for it.
+async fn google(
+    State(state): State<AppState>,
+    Json(body): Json<GoogleAuthRequest>,
+) -> Result<Json<AuthResponse>> {
+    let identity = crate::services::google::verify_id_token(
+        &state.http_client,
+        body.id_token.trim(),
+        &state.config.google_client_ids,
+    )
+    .await?;
+
+    // Returning learner: mint a session against the existing account and
+    // leave their course, voice and name exactly as they set them.
+    if let Some(user) = repositories::users::find_by_email(&state.pool, &identity.email).await? {
+        let pair = mint_token_pair(&state, user.id, Uuid::new_v4())?;
+        repositories::refresh_tokens::issue(
+            &state.pool,
+            user.id,
+            pair.family_id,
+            &pair.refresh_hash,
+            pair.expires_at,
+        )
+        .await?;
+        return Ok(Json(AuthResponse {
+            token: pair.access,
+            refresh_token: pair.raw_refresh,
+            user: user.into(),
+        }));
+    }
+
+    let language = body.language.clone().unwrap_or_else(|| "en".into());
+    let (base_language, language) = resolve_course_pair(&body.base_language, &language)?;
+
+    let new_user = NewUser {
+        id: Uuid::new_v4(),
+        email: identity.email,
+        // The column is NOT NULL and this account has no password, so it
+        // gets the hash of a value nobody holds: /login's Argon2 check can
+        // never match it, and the row stays shaped like every other user.
+        // ponytail: no `google_sub` column and no provider table — add them
+        // when a second provider or account unlinking exists.
+        password_hash: password::hash_password(
+            &repositories::refresh_tokens::generate_token(),
+        )
+        .map_err(|e| AppError::internal(format!("failed to hash password: {e}")))?,
+        base_language,
+        language,
+        voice: String::new(),
+        name: identity.name,
+    };
+
+    let pair = mint_token_pair(&state, new_user.id, Uuid::new_v4())?;
+    let user = repositories::users::create_with_refresh_token(
+        &state.pool,
+        &new_user,
+        &pair.refresh_hash,
+        pair.family_id,
         pair.expires_at,
     )
     .await?;

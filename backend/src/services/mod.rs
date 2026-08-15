@@ -8,6 +8,7 @@
 pub mod curriculum;
 pub mod flashcards;
 pub mod gamification;
+pub mod google;
 pub mod planets;
 pub mod realtime;
 pub mod stories;

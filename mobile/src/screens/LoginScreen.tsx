@@ -21,15 +21,23 @@ function OutlineButton({
   onPress,
   icon,
   strong,
+  disabled,
 }: {
   label: string;
   onPress: () => void;
   icon?: React.ReactNode;
   /** Purple bold text, for the create-account row. */
   strong?: boolean;
+  disabled?: boolean;
 }) {
   return (
-    <Pressable style={styles.outline} onPress={onPress} accessibilityRole="button">
+    <Pressable
+      style={[styles.outline, disabled && styles.outlineDisabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
+    >
       {icon}
       <Text style={[styles.outlineText, strong && styles.outlineTextStrong]}>{label}</Text>
     </Pressable>
@@ -41,7 +49,9 @@ export function LoginScreen({ navigation }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
+  const [googleError, setGoogleError] = useState<string | null>(null);
   const signIn = useAuthStore((s) => s.signIn);
+  const signInWithGoogle = useAuthStore((s) => s.signInWithGoogle);
 
   // Staggered entrance for the form fields
   const fieldIn = useRef(new Animated.Value(0)).current;
@@ -70,6 +80,14 @@ export function LoginScreen({ navigation }: Props) {
     onError: (err) => {
       const message = err instanceof Error ? err.message : t('common.somethingWrong');
       setFieldErrors((prev) => ({ ...prev, password: message }));
+    },
+  });
+
+  const googleMutation = useMutation({
+    mutationFn: signInWithGoogle,
+    onMutate: () => setGoogleError(null),
+    onError: (err) => {
+      setGoogleError(err instanceof Error ? err.message : t('common.somethingWrong'));
     },
   });
 
@@ -139,9 +157,13 @@ export function LoginScreen({ navigation }: Props) {
 
       <OutlineButton
         label={t('auth.login.continueWithProvider', { provider: 'Google' })}
-        onPress={() => {}}
+        onPress={() => googleMutation.mutate()}
         icon={<GoogleMark size={20} />}
+        // A second tap while the native sheet is up is rejected by the SDK
+        // with an IN_PROGRESS error, which would read as a failed login.
+        disabled={googleMutation.isPending}
       />
+      {googleError ? <Text style={styles.googleError}>{googleError}</Text> : null}
       <View style={styles.outlineGap} />
       <OutlineButton
         label={t('auth.login.createAccount')}
@@ -190,6 +212,16 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.border,
     backgroundColor: colors.card,
+  },
+  outlineDisabled: {
+    opacity: 0.5,
+  },
+  googleError: {
+    marginTop: 6,
+    marginLeft: 4,
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.error,
   },
   outlineGap: {
     height: spacing.sm,

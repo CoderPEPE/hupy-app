@@ -54,6 +54,7 @@ mod tests {
             database_url: String::new(),
             jwt_secret: SECRET.into(),
             openai_api_key: String::new(),
+            google_client_ids: Vec::new(),
             port: 0,
             cors_origin: None,
             tts_model: "gpt-4o-mini-tts".into(),

@@ -1,8 +1,11 @@
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { Platform } from 'react-native';
 import { create } from 'zustand';
 import { getSecureStorage, SecureKeys, storage, StorageKeys } from '../storage';
 import type { User } from '../types';
 import * as authApi from '../api/auth';
 import { ApiError, setSessionExpiredHandler } from '../api/client';
+import { GOOGLE_IOS_CLIENT_ID, GOOGLE_WEB_CLIENT_ID } from '../config';
 import { localeForBaseLanguage, useI18nStore } from '../i18n';
 
 type AuthState = {
@@ -12,6 +15,10 @@ type AuthState = {
   initialized: boolean;
   restore: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
+  /** Runs the native Google sheet and trades the ID token for a session.
+   * Resolves `false` when the learner dismissed the sheet — a cancellation
+   * is not an error and must not surface as one. */
+  signInWithGoogle: () => Promise<boolean>;
   signUp: (email: string, password: string, name?: string) => Promise<void>;
   /** Persists a course change (base, target) to the backend. */
   setLanguage: (language: string, baseLanguage?: string) => Promise<void>;
@@ -77,6 +84,30 @@ function persistSession(res: authApi.AuthResponse): void {
   persistUser(res.user);
 }
 
+let googleConfigured = false;
+
+/**
+ * Points the native SDK at this app's OAuth clients. `configure` is
+ * synchronous and idempotent, so it runs on first use rather than at app
+ * start — the many launches that never touch the Google button pay nothing.
+ */
+function configureGoogle(): void {
+  if (googleConfigured) return;
+  if (!GOOGLE_WEB_CLIENT_ID) {
+    // Without it Google returns no ID token at all, so there is nothing to
+    // send the backend. Failing here names the cause; failing later would
+    // surface as a null token deep in the flow.
+    throw new Error('Google sign-in is not configured for this build.');
+  }
+  GoogleSignin.configure({
+    webClientId: GOOGLE_WEB_CLIENT_ID,
+    // Android takes its client from the SHA-1 registration instead, so this
+    // is legitimately unset in an Android-only configuration.
+    iosClientId: GOOGLE_IOS_CLIENT_ID || undefined,
+  });
+  googleConfigured = true;
+}
+
 /** The whole session is wiped: state, storage, and (fire-and-forget) the
  * server-side refresh token so it can't be replayed after logout. */
 function clearSession(revokeServerSide: boolean): void {
@@ -86,6 +117,17 @@ function clearSession(revokeServerSide: boolean): void {
       // Best effort — the local session is gone regardless of what the
       // server says (offline logout must never fail the UI).
     });
+  }
+  // Drop the cached native Google session too, or the next Google sign-in
+  // can silently reuse the account that just logged out — leaving no way to
+  // switch accounts on a shared device.
+  try {
+    configureGoogle();
+    GoogleSignin.signOut().catch(() => {
+      // Best effort, same as the refresh-token revocation above.
+    });
+  } catch {
+    // No Google client configured in this build — nothing to sign out of.
   }
   getSecureStorage().remove(SecureKeys.authToken);
   getSecureStorage().remove(SecureKeys.refreshToken);
@@ -136,6 +178,32 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const res = await authApi.login(email, password);
     persistSession(res);
     set({ token: res.token, user: res.user });
+  },
+
+  signInWithGoogle: async () => {
+    configureGoogle();
+    // Android only: turns a missing/outdated Play Services into the standard
+    // update prompt instead of an opaque native rejection.
+    if (Platform.OS === 'android') await GoogleSignin.hasPlayServices();
+
+    const result = await GoogleSignin.signIn();
+    if (result.type !== 'success') return false;
+
+    const idToken = result.data.idToken;
+    if (!idToken) {
+      // Almost always a webClientId that doesn't match the project the iOS
+      // or Android client belongs to.
+      throw new Error('Google did not return an ID token.');
+    }
+
+    // The course picked before login travels with a first-time account; the
+    // backend ignores it for an account that already exists.
+    const baseLanguage = storage.getString(StorageKeys.baseLanguage) ?? undefined;
+    const language = storage.getString(StorageKeys.targetLanguage) ?? undefined;
+    const res = await authApi.googleLogin(idToken, baseLanguage, language);
+    persistSession(res);
+    set({ token: res.token, user: res.user });
+    return true;
   },
 
   signUp: async (email, password, name) => {

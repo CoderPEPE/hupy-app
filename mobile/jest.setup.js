@@ -78,6 +78,21 @@ jest.mock('expo-secure-store', () => {
   };
 });
 
+// @react-native-google-signin/google-signin: the real module reaches for the
+// RNGoogleSignin turbo module at import time and throws outside a device
+// build, which would take down every suite that touches the auth store.
+// Tests that exercise the Google flow override these per-test.
+jest.mock('@react-native-google-signin/google-signin', () => ({
+  GoogleSignin: {
+    configure: jest.fn(),
+    hasPlayServices: jest.fn(async () => true),
+    // The default is a dismissed sheet: a test that wants a successful
+    // sign-in must say so, so no test passes on an accidental success.
+    signIn: jest.fn(async () => ({ type: 'cancelled', data: null })),
+    signOut: jest.fn(async () => null),
+  },
+}));
+
 // expo-crypto: deterministic random bytes so generated keys are stable in
 // tests (asserted by value, not just shape).
 jest.mock('expo-crypto', () => ({
