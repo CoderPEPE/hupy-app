@@ -10,3 +10,4 @@ minimumReleaseAgeExclude:
   - expo-constants@57.0.10
   - expo-server@57.0.2
   - expo@57.0.12
+  - expo-updates@57.0.14

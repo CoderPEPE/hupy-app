@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "hupy",
+    "name": "Hupy",
     "slug": "hupy",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -14,7 +14,8 @@
         ]
       },
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "hupy uses the microphone so you can practice speaking English with your AI tutor.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Hupy uses the microphone so you can practice speaking English with your AI tutor.",
         "UIBackgroundModes": [
           "audio"
         ],
@@ -27,10 +28,8 @@
     "android": {
       "allowBackup": false,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
@@ -58,6 +57,12 @@
         "projectId": "bddea073-ba95-4095-96c8-4d08f362f20b"
       }
     },
-    "owner": "esophk"
+    "owner": "esophk",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/bddea073-ba95-4095-96c8-4d08f362f20b"
+    }
   }
 }
