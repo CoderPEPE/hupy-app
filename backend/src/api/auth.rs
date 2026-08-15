@@ -25,6 +25,7 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/refresh", post(refresh))
         .route("/logout", post(logout))
         .route("/me", get(me))
+        .route("/account", axum::routing::delete(delete_account))
         .route("/language", post(set_language))
         .route("/voice", post(set_voice))
         .route("/name", post(set_name))
@@ -485,6 +486,27 @@ async fn me(
         .ok_or_else(|| AppError::unauthorized("User no longer exists"))?;
 
     Ok(Json(user.into()))
+}
+
+/// Permanently erases the signed-in account and everything attached to it.
+///
+/// Authenticated by the access token alone: the caller already proved they
+/// hold a valid session, and this endpoint cannot reach any account but
+/// their own. Deliberately idempotent — a retry after a dropped response
+/// must not read as a failure to the app that already discarded its session.
+///
+/// ponytail: no grace period and no soft-delete column. Add a
+/// `deleted_at` + scheduled purge if the product ever needs "undo within N
+/// days"; until then a delete that leaves the data behind is a lie.
+async fn delete_account(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+) -> Result<StatusCode> {
+    let existed = repositories::users::delete_by_id(&state.pool, user_id).await?;
+    if existed {
+        tracing::info!("account {user_id} deleted at the owner's request");
+    }
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Deserialize)]

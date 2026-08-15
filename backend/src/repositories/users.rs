@@ -111,6 +111,21 @@ pub async fn update_voice(pool: &DbPool, user_id: Uuid, voice: &str) -> Result<O
     .await
 }
 
+/// Erases the account. Every table that references `users(id)` declares
+/// `ON DELETE CASCADE`, so this one statement also takes the refresh tokens,
+/// progress, conversations, flashcards, stories and gamification rows with
+/// it — there is no orphan left behind and no second pass to keep in sync.
+///
+/// Returns whether a row was actually removed, so a repeated delete reads as
+/// "already gone" rather than a spurious success on a missing account.
+pub async fn delete_by_id(pool: &DbPool, user_id: Uuid) -> Result<bool> {
+    run_db(pool, move |conn| {
+        let removed = diesel::delete(users::table.find(user_id)).execute(conn)?;
+        Ok(removed > 0)
+    })
+    .await
+}
+
 /// Changes the learner's display name.
 pub async fn update_name(pool: &DbPool, user_id: Uuid, name: &str) -> Result<Option<User>> {
     let name = name.to_string();

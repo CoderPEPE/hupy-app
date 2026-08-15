@@ -26,6 +26,8 @@ type AuthState = {
   setVoice: (voice: string) => Promise<void>;
   /** Persists the learner's display name to the backend. */
   setName: (name: string) => Promise<void>;
+  /** Erases the account server-side, then tears down the local session. */
+  deleteAccount: () => Promise<void>;
   signOut: () => void;
 };
 
@@ -241,6 +243,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const user = await authApi.setName(name);
     persistUser(user);
     set({ user });
+  },
+
+  deleteAccount: async () => {
+    // Delete first: if the call fails the session must survive, or the
+    // learner is logged out of an account that still exists. Only once the
+    // server confirms is the local session torn down — and without the
+    // logout call, since the refresh token died with the account.
+    await authApi.deleteAccount();
+    clearSession(false);
   },
 
   signOut: () => {

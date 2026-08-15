@@ -12,6 +12,7 @@ jest.mock('../api/auth', () => ({
   login: jest.fn(),
   register: jest.fn(),
   googleLogin: jest.fn(),
+  deleteAccount: jest.fn(),
   me: jest.fn(),
   refresh: jest.fn(),
   logout: jest.fn().mockResolvedValue(undefined),
@@ -277,6 +278,52 @@ describe('setLanguage / setVoice / setName', () => {
 });
 
 // --- signOut -------------------------------------------------------------
+
+describe('deleteAccount', () => {
+  const signedIn = () => {
+    getSecureStorage().set(SecureKeys.authToken, 'token-1');
+    getSecureStorage().set(SecureKeys.refreshToken, 'refresh-1');
+    getSecureStorage().set(SecureKeys.authUser, JSON.stringify(user()));
+    useAuthStore.setState({ token: 'token-1', user: user() });
+  };
+
+  it('wipes the local session once the server confirms', async () => {
+    signedIn();
+    mockApi<() => Promise<void>>(authApi.deleteAccount).mockResolvedValue(undefined);
+
+    await useAuthStore.getState().deleteAccount();
+
+    expect(getSecureStorage().getString(SecureKeys.authToken)).toBeNull();
+    expect(getSecureStorage().getString(SecureKeys.refreshToken)).toBeNull();
+    expect(getSecureStorage().getString(SecureKeys.authUser)).toBeNull();
+    expect(useAuthStore.getState()).toMatchObject({ token: null, user: null });
+  });
+
+  /// The account still exists if the call failed, so logging the learner out
+  /// of it would strand them — locked out of something that is still there.
+  it('keeps the session when the delete fails', async () => {
+    signedIn();
+    mockApi<() => Promise<void>>(authApi.deleteAccount).mockRejectedValue(
+      new ApiError(500, 'internal server error'),
+    );
+
+    await expect(useAuthStore.getState().deleteAccount()).rejects.toThrow();
+
+    expect(getSecureStorage().getString(SecureKeys.authToken)).toBe('token-1');
+    expect(useAuthStore.getState().token).toBe('token-1');
+  });
+
+  /// The refresh token dies with the account, so calling /logout afterwards
+  /// would be a guaranteed-404 round trip on a dead session.
+  it('does not call logout — the account is already gone', async () => {
+    signedIn();
+    mockApi<() => Promise<void>>(authApi.deleteAccount).mockResolvedValue(undefined);
+
+    await useAuthStore.getState().deleteAccount();
+
+    expect(authApi.logout).not.toHaveBeenCalled();
+  });
+});
 
 describe('signOut', () => {
   it('clears the token pair, user, and storage', () => {

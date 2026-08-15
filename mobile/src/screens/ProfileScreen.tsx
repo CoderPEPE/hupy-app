@@ -7,13 +7,14 @@ import {
   Mic,
   Settings,
   Star,
+  Trash2,
   Trophy,
   User,
   X,
 } from 'lucide-react-native';
 import React, { useEffect, useState } from 'react';
-import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useQueryClient } from '@tanstack/react-query';
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useGamificationStats, queryKeys } from '../api/hooks';
 import type { Badge } from '../api/gamification';
 import { AchievementsModal } from '../components/AchievementsModal';
@@ -85,13 +86,34 @@ function BadgeRow({ badge }: { badge: Badge }) {
  * visible sign-out on the page itself, so it lives here. */
 function SettingsSheet({ visible, onClose, onSignOut }: { visible: boolean; onClose: () => void; onSignOut: () => void }) {
   const t = useT();
+  const deleteAccount = useAuthStore((s) => s.deleteAccount);
+  // Two-step by design: the first tap only arms the confirmation. Erasing an
+  // account is unrecoverable, so it must never be one stray tap away.
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: deleteAccount,
+    onMutate: () => setError(null),
+    onError: (err) => setError(err instanceof Error ? err.message : t('common.somethingWrong')),
+    // No navigation on success: clearing the session drops the whole app
+    // back to the auth stack on its own.
+  });
+
+  // Re-opening the sheet must start disarmed, never mid-confirmation.
+  const close = () => {
+    setConfirming(false);
+    setError(null);
+    onClose();
+  };
+
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.sheetScrim} onPress={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={close}>
+      <Pressable style={styles.sheetScrim} onPress={close}>
         <Pressable style={styles.sheet} onPress={(e) => e.stopPropagation()}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{t('profile.settings')}</Text>
-            <IconButton onPress={onClose} accessibilityLabel={t('common.tryAgain')}>
+            <IconButton onPress={close} accessibilityLabel={t('common.close')}>
               <X size={18} color={colors.textMuted} />
             </IconButton>
           </View>
@@ -99,6 +121,47 @@ function SettingsSheet({ visible, onClose, onSignOut }: { visible: boolean; onCl
             <LogOut size={16} color={colors.error} />
             <Text style={styles.signOutText}>{t('chat.logOut')}</Text>
           </Pressable>
+
+          {confirming ? (
+            <View style={styles.dangerZone}>
+              <Text style={styles.dangerTitle}>{t('profile.deleteAccountTitle')}</Text>
+              <Text style={styles.dangerBody}>{t('profile.deleteAccountBody')}</Text>
+              {error ? <Text style={styles.dangerError}>{error}</Text> : null}
+              <Pressable
+                style={[styles.deleteBtn, mutation.isPending && styles.deleteBtnBusy]}
+                onPress={() => mutation.mutate()}
+                disabled={mutation.isPending}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: mutation.isPending }}
+              >
+                {mutation.isPending ? (
+                  <ActivityIndicator size="small" color={colors.card} />
+                ) : (
+                  <>
+                    <Trash2 size={16} color={colors.card} />
+                    <Text style={styles.deleteText}>{t('profile.deleteAccountConfirm')}</Text>
+                  </>
+                )}
+              </Pressable>
+              <Pressable
+                style={styles.keepBtn}
+                onPress={() => setConfirming(false)}
+                disabled={mutation.isPending}
+                accessibilityRole="button"
+              >
+                <Text style={styles.keepText}>{t('profile.deleteAccountCancel')}</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              style={styles.deleteLink}
+              onPress={() => setConfirming(true)}
+              accessibilityRole="button"
+            >
+              <Trash2 size={15} color={colors.textMuted} />
+              <Text style={styles.deleteLinkText}>{t('profile.deleteAccount')}</Text>
+            </Pressable>
+          )}
         </Pressable>
       </Pressable>
     </Modal>
@@ -592,5 +655,70 @@ const styles = StyleSheet.create({
   },
   nameSaveRow: {
     marginTop: spacing.md,
+  },
+  // Delete account: understated until armed, so it never competes with
+  // sign-out for a distracted tap.
+  deleteLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: spacing.md,
+    marginTop: spacing.xs,
+  },
+  deleteLinkText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
+  dangerZone: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.error,
+    backgroundColor: colors.errorSoft,
+    gap: spacing.sm,
+  },
+  dangerTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.error,
+  },
+  dangerBody: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: colors.text,
+  },
+  dangerError: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.error,
+  },
+  deleteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    minHeight: 48,
+    borderRadius: radius.lg,
+    backgroundColor: colors.error,
+  },
+  deleteBtnBusy: {
+    opacity: 0.7,
+  },
+  deleteText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: colors.card,
+  },
+  keepBtn: {
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+  },
+  keepText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.text,
   },
 });

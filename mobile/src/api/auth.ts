@@ -66,6 +66,13 @@ export function logout(refreshToken: string) {
   });
 }
 
+/** Permanently erases the signed-in account and all its data. The server
+ * cascades to progress, conversations, flashcards and tokens; there is no
+ * undo. */
+export function deleteAccount() {
+  return apiRequest<void>('/api/auth/account', { method: 'DELETE', auth: true });
+}
+
 export function me() {
   return apiRequest<User>('/api/auth/me', { auth: true });
 }
