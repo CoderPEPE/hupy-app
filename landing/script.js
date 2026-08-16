@@ -31,7 +31,7 @@
   onScroll();
 
   // Scroll-reveal for sections
-  var revealables = document.querySelectorAll('.section-head, .feature-grid, .steps, .planet-row, .language-strip, .cta-card, .privacy-inner');
+  var revealables = document.querySelectorAll('.section-head, .feature-grid, .steps, .planet-row, .language-strip, .cta-card, .legal-inner');
   if ('IntersectionObserver' in window) {
     revealables.forEach(function (el) { el.classList.add('reveal'); });
     var io = new IntersectionObserver(function (entries) {

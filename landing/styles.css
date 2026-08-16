@@ -205,6 +205,8 @@ a { color: inherit; }
   transition: color 0.15s ease;
 }
 .nav-links a:hover { color: var(--purple); }
+.nav-links a[aria-current="page"] { color: var(--purple); }
+.mobile-menu a[aria-current="page"] { color: var(--purple); }
 
 .nav-burger {
   display: none;
@@ -237,6 +239,9 @@ a { color: inherit; }
   border-top: 1px solid rgba(74, 68, 190, 0.08);
   background: #fff;
 }
+/* `display:flex` above would otherwise beat the UA `[hidden]` rule and the
+   menu could never be closed. */
+.mobile-menu[hidden] { display: none; }
 .mobile-menu a:not(.btn) {
   padding: 12px 4px;
   text-decoration: none;
@@ -632,49 +637,103 @@ a { color: inherit; }
 
 .cta-note { margin: 22px 0 0; font-size: 14px; color: var(--space-muted); }
 
-/* ─────────────────────────── Privacy Policy ─────────────────────────── */
+/* ─────────────────────────── Legal pages (Privacy / Terms) ─────────────────────────── */
 
-.privacy { padding-top: 72px; }
-
-.privacy-inner { max-width: 820px; }
-
-.privacy-body {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 24px;
-  padding: clamp(24px, 5vw, 52px);
+.legal-page {
+  background: linear-gradient(180deg, var(--purple-wash) 0%, #F8F7FE 300px, var(--bg) 100%);
+  padding: 72px 0 96px;
 }
 
-.privacy-lede {
+.legal-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--purple);
+  text-decoration: none;
+  margin-bottom: 32px;
+  transition: color 0.15s ease;
+}
+.legal-back:hover { color: var(--purple-deep); }
+
+.legal-inner { max-width: 820px; }
+
+.legal-hero h1 {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 5vw, 44px);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 12px 0 10px;
+  color: var(--text);
+}
+.legal-meta {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0;
+}
+.legal-meta time { font-weight: 700; color: var(--text); }
+
+.legal-body {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  box-shadow: var(--shadow-card);
+  padding: clamp(28px, 5vw, 56px);
+}
+
+.legal-lede {
   font-size: 17px;
-  color: var(--space-muted);
+  line-height: 1.65;
+  color: var(--text);
   margin: 0 0 8px;
 }
 
-.privacy-block h3 {
+.legal-block h3 {
   font-family: var(--font-display);
-  font-size: 18px;
-  margin: 34px 0 10px;
-  color: #fff;
+  font-size: 19px;
+  color: var(--purple);
+  margin: 38px 0 12px;
+  padding-top: 26px;
+  border-top: 1px solid var(--border);
 }
-.privacy-block:first-of-type h3 { margin-top: 24px; }
+.legal-block:first-of-type h3 { margin-top: 28px; padding-top: 0; border-top: 0; }
 
-.privacy-block p { color: var(--space-muted); margin: 0 0 10px; }
+.legal-block p { color: var(--text-muted); margin: 0 0 12px; line-height: 1.7; }
 
-.privacy-block ul { margin: 0 0 6px; padding-left: 20px; }
-.privacy-block li { color: var(--space-muted); margin-bottom: 8px; }
-.privacy-block li strong { color: var(--space-text); }
+.legal-block ul { margin: 0 0 12px; padding-left: 22px; }
+.legal-block li { color: var(--text-muted); margin-bottom: 10px; line-height: 1.7; }
+.legal-block li strong { color: var(--text); }
 
-.privacy-block a { color: var(--mint); }
-.privacy-block a:hover { text-decoration: underline; }
+.legal-block a { color: var(--purple); font-weight: 600; }
+.legal-block a:hover { text-decoration: underline; }
 
-.privacy-note {
+.legal-note {
   font-size: 14px;
-  padding: 12px 16px;
-  border-left: 3px solid var(--lavender);
-  background: rgba(168, 164, 236, 0.08);
+  line-height: 1.6;
+  padding: 14px 18px;
+  border-left: 3px solid var(--indigo);
+  background: var(--purple-soft);
   border-radius: 0 12px 12px 0;
+  color: var(--text);
 }
+
+.legal-more {
+  margin-top: 34px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--text-muted);
+}
+.legal-more a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 10px;
+  font-weight: 700;
+  color: var(--purple);
+  text-decoration: none;
+}
+.legal-more a:hover { text-decoration: underline; }
 
 /* ─────────────────────────── Footer ─────────────────────────── */
 
