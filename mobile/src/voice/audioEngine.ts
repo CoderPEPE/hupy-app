@@ -25,6 +25,16 @@ export function configureIosSession(): void {
 const OUTPUT_SAMPLE_RATE = 24000;
 
 class RealtimeAudioPlayer {
+  /** How far ahead of the speaker playback may be queued before new audio is
+   * dropped. Bounds the memory held by scheduled-but-unplayed buffers when
+   * the JS thread falls behind (slow device, GC pressure, an error handler
+   * grinding the runtime) — the tutor's audio hiccups instead of the queue
+   * (and the app's memory) growing for the whole session. */
+  private static QUEUE_LIMIT_MS = 20_000;
+  /** Upper bound on simultaneously alive buffer sources — a second, cheaper
+   * guard on top of the time-based cap above. */
+  private static MAX_SOURCES = 64;
+
   private context: AudioContext | null = null;
   /** True while a live voice conversation is open — the XP chime player uses
    * this to stay silent during conversations (a synthetic ding mid-dialogue
@@ -36,8 +46,12 @@ class RealtimeAudioPlayer {
   private playbackEndAt = 0;
   private sources = new Set<AudioBufferSourceNode>();
   /** Pending level-meter publishes, so `clear()` (barge-in) can cancel the
-   * waveform updates for audio that will now never be heard. */
-  private levelTimers = new Set<ReturnType<typeof setTimeout>>();
+   * waveform updates for audio that will now never be heard. Slices are
+   * pushed onto a single queue drained by one interval — publishing a level
+   * never costs a live timer object per slice, so a long turn can't build up
+   * thousands of timers. */
+  private levelQueue: Array<{ level: number; dueAt: number }> = [];
+  private levelTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
    * Reports the loudness of a chunk to the waveform at the moment it actually
@@ -45,19 +59,32 @@ class RealtimeAudioPlayer {
    * arrival would run the visualization ahead of the sound.
    *
    * Long chunks are sampled in ~80 ms slices so the wave tracks the shape of
-   * the speech rather than flat-lining at one value per chunk.
+   * the speech rather than flat-lining at one value per chunk. Slices are
+   * stamped with their wall-clock due time and drained by a single interval.
    */
   private scheduleLevels(samples: Float32Array, rate: number, startInMs: number): void {
     const sliceMs = 80;
     const sliceLen = Math.max(1, Math.floor((rate * sliceMs) / 1000));
+    const baseDueAt = Date.now() + Math.max(0, startInMs);
     for (let offset = 0, i = 0; offset < samples.length; offset += sliceLen, i++) {
       const slice = samples.subarray(offset, Math.min(offset + sliceLen, samples.length));
-      const level = rms(slice);
-      const timer = setTimeout(() => {
-        this.levelTimers.delete(timer);
-        audioLevels.publish(level, 'playback');
-      }, startInMs + i * sliceMs);
-      this.levelTimers.add(timer);
+      this.levelQueue.push({ level: rms(slice), dueAt: baseDueAt + i * sliceMs });
+    }
+    if (!this.levelTimer) {
+      this.levelTimer = setInterval(() => this.flushLevels(), sliceMs);
+    }
+  }
+
+  /** Publishes every level whose moment has arrived; stops the interval once
+   * the queue is empty. */
+  private flushLevels(): void {
+    const now = Date.now();
+    while (this.levelQueue.length > 0 && this.levelQueue[0].dueAt <= now) {
+      audioLevels.publish(this.levelQueue.shift()!.level, 'playback');
+    }
+    if (this.levelQueue.length === 0 && this.levelTimer) {
+      clearInterval(this.levelTimer);
+      this.levelTimer = null;
     }
   }
 
@@ -76,6 +103,13 @@ class RealtimeAudioPlayer {
   async playPcm16Base64(base64: string): Promise<void> {
     try {
       const ctx = await this.getContext();
+      // If playback is already this far behind, drop the incoming chunk
+      // instead of enqueueing: the backlog is bounded by QUEUE_LIMIT_MS of
+      // buffers, not by the length of the conversation.
+      const queuedMs = (this.nextStartTime - ctx.currentTime) * 1000;
+      if (queuedMs > RealtimeAudioPlayer.QUEUE_LIMIT_MS || this.sources.size >= RealtimeAudioPlayer.MAX_SOURCES) {
+        return;
+      }
       const float32 = pcm16Base64ToFloat32(base64);
       if (float32.length === 0) return;
 
@@ -158,8 +192,11 @@ class RealtimeAudioPlayer {
     this.sources.clear();
     // Drop queued waveform updates for audio that is no longer going to play,
     // then flatten the meter.
-    this.levelTimers.forEach(clearTimeout);
-    this.levelTimers.clear();
+    this.levelQueue = [];
+    if (this.levelTimer) {
+      clearInterval(this.levelTimer);
+      this.levelTimer = null;
+    }
     audioLevels.publish(0, 'playback');
     this.nextStartTime = 0;
     this.playbackEndAt = 0;

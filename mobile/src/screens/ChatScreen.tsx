@@ -59,12 +59,7 @@ import { colors, radius, shadows, spacing, typography } from '../theme';
 import { displayName } from '../utils/userName';
 import { useVoiceConversation, type ToolCallHandler } from '../voice/useVoiceConversation';
 import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
-import {
-  type ChatMessage,
-  type ConversationSummary,
-  type LessonCorrection,
-  type LessonStepKind,
-} from '../types';
+import { type ConversationSummary, type LessonCorrection } from '../types';
 
 // ---------------------------------------------------------------------------
 // Module drill progress (lesson chats only)
@@ -266,7 +261,6 @@ export function ChatScreen() {
   const logProduction = useRecordProduction();
   const { data: gamification } = useGamificationStats();
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [showHistory, setShowHistory] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
@@ -276,7 +270,6 @@ export function ChatScreen() {
   // starts so the progress bar stays on it even after the module's
   // conversation closes and the planet detail moves on to the next one.
   const [sessionLessonId, setSessionLessonId] = useState<string | null>(null);
-  const scrollRef = useRef<ScrollView>(null);
 
   // One backend conversation per session — created once, on mount.
   const conversationIdRef = useRef<string | null>(null);
@@ -334,27 +327,6 @@ export function ChatScreen() {
           verb: asOptionalString(args.verb),
           complement: asOptionalString(args.complement),
         });
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `correction-${corr.id}`,
-            role: 'tutor',
-            text: t('chat.correction.title'),
-            time: '',
-            kind: 'correction' as LessonStepKind,
-            correction: {
-              id: corr.id,
-              said: corr.said,
-              corrected: corr.corrected,
-              explanation: corr.explanation,
-              pt: corr.pt,
-              mistake_part: corr.mistake_part,
-              subject: corr.subject,
-              verb: corr.verb,
-              complement: corr.complement,
-            },
-          },
-        ]);
         return { ok: true, correction_id: corr.id };
       }
       case 'create_flashcard': {
@@ -430,28 +402,6 @@ export function ChatScreen() {
     planetId: lessonPlanetId ?? undefined,
   });
 
-  // Merge the voice engine's transcript into the local message list without
-  // clobbering tool-call-originated messages (corrections) appended above:
-  // update existing entries in place, append genuinely new ones.
-  useEffect(() => {
-    if (voice.messages.length === 0) return;
-    setMessages((prev) => {
-      const byId = new Map(voice.messages.map((m) => [m.id, m] as const));
-      const next = prev.map((m) => {
-        const vm = byId.get(m.id);
-        return vm ? { ...m, text: vm.text, partial: vm.partial } : m;
-      });
-      const seen = new Set(next.map((m) => m.id));
-      for (const vm of voice.messages) {
-        if (!seen.has(vm.id)) {
-          next.push({ id: vm.id, role: vm.role, text: vm.text, time: '', partial: vm.partial });
-          seen.add(vm.id);
-        }
-      }
-      return next;
-    });
-  }, [voice.messages]);
-
   // Persist finalized voice messages to the conversation.
   useEffect(() => {
     if (!conversationIdRef.current) return;
@@ -501,11 +451,11 @@ export function ChatScreen() {
   }, [lessonPlanetId]);
 
   /** "+" in the composer: close the session and start a fresh conversation.
-   * `openSession` clears the voice transcript on the next start, so the local
-   * list can be emptied here without the old turns being merged back in. */
+   * `openSession` clears the voice transcript on the next start, so the
+   * persisted-message bookkeeping resets here without old turns being
+   * re-sent. */
   const newConversation = () => {
     voice.stop();
-    setMessages([]);
     persistedMessagesRef.current.clear();
     conversationIdRef.current = null;
   };
@@ -546,10 +496,6 @@ export function ChatScreen() {
     }
     prevBadgeCountRef.current = count;
   }, [gamification]);
-
-  useEffect(() => {
-    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
-  }, [messages]);
 
   // Tear down on unmount so a background/backgrounded screen doesn't keep
   // streaming mic audio.
@@ -631,15 +577,6 @@ export function ChatScreen() {
   };
 
 
-  // One line of guidance above the transcript: a correction to read, the
-  // tutor's turn to listen to, or the user's turn to talk.
-  const lastMessage = messages[messages.length - 1];
-  const stepPrompt = lastMessage?.correction
-    ? t('chat.correctPrompt')
-    : voice.status === 'listening'
-      ? t('chat.speakPrompt')
-      : t('chat.listenPrompt');
-
   // The module this session's tutor teaches, for the drill bar — pinned at
   // session start (see `startConversation`) so it doesn't jump to the next
   // module the moment the current one's conversation closes.
@@ -647,15 +584,6 @@ export function ChatScreen() {
     (sessionLessonId
       ? planetDetail?.lessons.find((l) => l.id === sessionLessonId)
       : currentModule) ?? null;
-
-  // The last few messages, rendered as compact chat bubbles above the globe.
-  const recentMessages = messages.slice(-10);
-  // The tutor's latest real utterance — emphasized as the phrase to repeat.
-  // Computed from the same slice the bubbles render, so the focus never
-  // disagrees with what's on screen.
-  const focusPhraseId =
-    [...recentMessages].reverse().find((m) => m.role === 'tutor' && m.kind !== 'correction')?.id ?? null;
-  const lastVisible = recentMessages[recentMessages.length - 1];
 
   return (
     <View style={styles.screen}>
@@ -722,82 +650,29 @@ export function ChatScreen() {
         )
       ) : (
         <ScrollView
-          ref={scrollRef}
           style={styles.transcript}
-          contentContainerStyle={[
-            styles.transcriptContent,
-            // Nothing said yet → the orb owns the screen, centered.
-            recentMessages.length === 0 && styles.transcriptEmpty,
-          ]}
+          contentContainerStyle={[styles.transcriptContent, styles.transcriptEmpty]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* The prompt only appears once there's something to drill — an
-              untouched screen is just the orb and its invitation. */}
-          {recentMessages.length > 0 && <Text style={styles.stepPrompt}>{stepPrompt}</Text>}
-
-          {recentMessages.length === 0 ? (
-            <View style={styles.hero}>
-              <VoiceGlobe active={globeActive} onPress={onOrbPress} accessibilityLabel={orbLabel} />
-              <Text style={styles.heroTitle}>
-                {t('chat.empty.title', { language: t(`chat.lang.${targetLanguage}` as TranslationKey) })}
-              </Text>
-              {/* Before the session opens this is the pitch; once it's live
-                  the same line carries the connection state, so the promise of
-                  speech is only made when the tutor can actually deliver it. */}
-              <Text style={styles.heroSubtitle}>
-                {globeActive ? liveHint : t('chat.empty.subtitle')}
-              </Text>
-              <Pressable onPress={onOrbPress} hitSlop={10} accessibilityRole="button">
-                <Text style={styles.heroCta}>{globeActive ? t('chat.orb.stop') : t('chat.empty.start')}</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={styles.chatBubbles}>
-              {recentMessages.map((m, i) => {
-                // Corrections render as the card below, not a plain bubble.
-                if (m.kind === 'correction') return null;
-                const isUser = m.role === 'user';
-                // The tutor's latest real utterance is the phrase to repeat —
-                // emphasized so the chat still reads as a drill.
-                const isFocus = m.id === focusPhraseId;
-                return (
-                  <View
-                    key={m.id}
-                    style={[styles.bubbleRow, isUser ? styles.bubbleRowUser : styles.bubbleRowTutor]}
-                  >
-                    <View
-                      style={[
-                        styles.bubble,
-                        isUser ? styles.bubbleUser : styles.bubbleTutor,
-                        isFocus && styles.bubbleFocus,
-                        m.partial && styles.bubblePartial,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          isUser ? styles.bubbleTextUser : styles.bubbleTextTutor,
-                          isFocus && styles.bubbleTextFocus,
-                        ]}
-                      >
-                        {m.text}
-                        {m.partial ? '…' : ''}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          )}
-
-          {lastVisible?.correction && <CorrectionCard correction={lastVisible.correction} />}
-
-          {recentMessages.length > 0 && (
-            <View style={styles.globeArea}>
-              <VoiceGlobe active={globeActive} onPress={onOrbPress} accessibilityLabel={orbLabel} size={120} />
-              <Text style={styles.orbHint}>{liveHint}</Text>
-            </View>
-          )}
+          {/* The screen is the globe: no transcript, just the orb and its
+              invitation. The same hero carries the live session state once a
+              conversation is open (see `liveHint`). */}
+          <View style={styles.hero}>
+            <VoiceGlobe active={globeActive} onPress={onOrbPress} accessibilityLabel={orbLabel} />
+            <Text style={styles.heroTitle}>
+              {t('chat.empty.title', { language: t(`chat.lang.${targetLanguage}` as TranslationKey) })}
+            </Text>
+            {/* Before the session opens this is the pitch; once it's live
+                the same line carries the connection state, so the promise of
+                speech is only made when the tutor can actually deliver it. */}
+            <Text style={styles.heroSubtitle}>
+              {globeActive ? liveHint : t('chat.empty.subtitle')}
+            </Text>
+            <Pressable onPress={onOrbPress} hitSlop={10} accessibilityRole="button">
+              <Text style={styles.heroCta}>{globeActive ? t('chat.orb.stop') : t('chat.empty.start')}</Text>
+            </Pressable>
+          </View>
         </ScrollView>
       )}
 
@@ -1148,25 +1023,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
   },
-  stepPrompt: {
-    ...typography.caption,
-    color: colors.textMuted,
-    marginBottom: spacing.sm,
-  },
-  chatBubbles: {
-    gap: spacing.sm,
-  },
-  bubbleFocus: {
-    backgroundColor: colors.primary,
-  },
-  bubbleTextFocus: {
-    color: colors.textOnPrimary,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  bubblePartial: {
-    opacity: 0.6,
-  },
   hero: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -1202,10 +1058,6 @@ const styles = StyleSheet.create({
   targetLangText: {
     fontSize: 13,
     color: colors.textMuted,
-  },
-  globeArea: {
-    alignItems: 'center',
-    marginTop: spacing.xl,
   },
   bubbleRow: {
     marginVertical: 4,
@@ -1341,12 +1193,6 @@ const styles = StyleSheet.create({
     marginLeft: 5,
     fontSize: 13,
     fontWeight: '700',
-    color: colors.primary,
-  },
-  orbHint: {
-    marginTop: 10,
-    fontSize: 13,
-    fontWeight: '800',
     color: colors.primary,
   },
   composer: {

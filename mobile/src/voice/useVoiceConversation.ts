@@ -30,6 +30,11 @@ export type ToolCallHandler = (name: string, args: Record<string, unknown>) => P
 const REALTIME_URL = 'wss://api.openai.com/v1/realtime?model=gpt-realtime-2.1';
 const RECORD_RATE = 48000; // supported by @siteed/audio-studio
 const TARGET_RATE = 24000; // required by the Realtime API
+/** Cap on the in-memory transcript: a marathon session must not grow the
+ * messages array (and every delta's copy of it) without bound. The UI only
+ * ever renders the last few messages, so history beyond this is not visible
+ * anyway — it exists only to keep partial-transcript lookups working. */
+const MAX_MESSAGES = 200;
 /** Last-resort voice, only used if the backend response carries none. The real
  * voice is the learner's chosen tutor voice (or their course's default), sent
  * back by `/realtime/client-secret` — see `startSessionVoice` below. */
@@ -184,19 +189,23 @@ export function useVoiceConversation(
   const appendMessage = (id: string, role: ChatMessage['role'], delta: string, partial: boolean) => {
     setMessages((prev) => {
       const idx = prev.findIndex((m) => m.id === id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = { ...next[idx], text: next[idx].text + delta, partial };
-        return next;
-      }
-      return [...prev, { id, role, text: delta, partial }];
+      const next =
+        idx >= 0
+          ? (() => {
+              const copy = [...prev];
+              copy[idx] = { ...copy[idx], text: copy[idx].text + delta, partial };
+              return copy;
+            })()
+          : [...prev, { id, role, text: delta, partial }];
+      return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
     });
   };
 
   const finalizeMessage = (id: string, text?: string) => {
-    setMessages((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, text: text ?? m.text, partial: false } : m)),
-    );
+    setMessages((prev) => {
+      const next = prev.map((m) => (m.id === id ? { ...m, text: text ?? m.text, partial: false } : m));
+      return next.length > MAX_MESSAGES ? next.slice(next.length - MAX_MESSAGES) : next;
+    });
   };
 
   /**
