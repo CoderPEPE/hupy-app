@@ -21,8 +21,8 @@ export const es: Translations = {
   'language.ptBR': 'Português (Brasil)',
 
   // Networking (api/client.ts)
-  'api.networkUnreachable': 'No se pudo conectar con el servidor. ¿Está el backend en marcha?',
-  'api.requestFailed': 'La solicitud falló (estado {{status}})',
+  'api.networkUnreachable': 'No pudimos conectar con Hupy. Revisa tu conexión e inténtalo de nuevo.',
+  'api.requestFailed': 'Algo salió mal. Inténtalo de nuevo.',
 
   // Full-screen offline state (components/OfflineScreen.tsx)
   'offline.title': 'Sin conexión',
@@ -39,6 +39,8 @@ export const es: Translations = {
   'auth.namePlaceholder': '¿Cómo quieres que te llamemos?',
   'auth.nameRequired': 'Ingresa tu nombre',
   'auth.emailInvalid': 'Ingresa un correo electrónico válido',
+  'auth.invalidCredentials': 'Ese correo y esa contraseña no coinciden. Inténtalo de nuevo.',
+  'auth.emailTaken': 'Ya existe una cuenta con este correo.',
   'auth.passwordRequired': 'Ingresa tu contraseña',
 
   // Auth — login
@@ -49,7 +51,6 @@ export const es: Translations = {
   'auth.login.or': 'o',
   'auth.login.continueWithProvider': 'Continuar con {{provider}}',
   'auth.login.createAccount': 'Crear mi cuenta',
-  'auth.forgotPassword': 'Olvidé mi contraseña',
   'auth.termsPrefix': 'Al continuar, aceptas nuestros ',
   'auth.terms': 'Términos de Uso',
   'auth.and': ' y ',
@@ -127,7 +128,9 @@ export const es: Translations = {
   'home.live': 'EN VIVO',
   'home.livePitch': 'Practica conversación con la IA.',
   'home.practiceNow': 'Practicar ahora',
-  'home.streakEncourage': '¡Sigue así! Lo estás haciendo muy bien.',
+  'home.streakCurrent': 'Racha actual',
+  'home.streakKeepGoing': '¡Sigue así!',
+  'home.streakDoingWell': 'Lo estás haciendo muy bien.',
   'home.dayOne': '{{count}} día',
   'home.dayOther': '{{count}} días',
   'home.profile': 'Perfil',
@@ -494,7 +497,6 @@ export const es: Translations = {
   'permissionModal.title': '¡Tu turno de hablar!',
   'permissionModal.body': 'Activa el Micrófono y el Reconocimiento de Voz para que hupy corrija tu pronunciación.',
   'permissionModal.unlockMic': 'Activar micrófono',
-  'permissionModal.unlockSpeech': 'Activar reconocimiento de voz',
 
   // Voice (useVoiceConversation.ts)
   'voice.micPermissionTitle': 'Acceso al micrófono',

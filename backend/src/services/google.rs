@@ -54,7 +54,11 @@ fn identity_from_claims(
         ));
     }
 
-    let email = info["email"].as_str().unwrap_or_default().trim().to_lowercase();
+    let email = info["email"]
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .to_lowercase();
     if email.is_empty() {
         return Err(AppError::unauthorized(
             "This Google account did not share an email address",
@@ -165,11 +169,13 @@ mod tests {
     #[test]
     fn accepts_email_verified_as_bool_or_string() {
         for verified in [json!(true), json!("true")] {
-            let info = json!({ "aud": "web-client-id", "email": "a@b.co", "email_verified": verified });
+            let info =
+                json!({ "aud": "web-client-id", "email": "a@b.co", "email_verified": verified });
             assert!(identity_from_claims(&info, &allowed()).is_ok());
         }
         for unverified in [json!(false), json!("false"), json!(null)] {
-            let info = json!({ "aud": "web-client-id", "email": "a@b.co", "email_verified": unverified });
+            let info =
+                json!({ "aud": "web-client-id", "email": "a@b.co", "email_verified": unverified });
             assert!(identity_from_claims(&info, &allowed()).is_err());
         }
     }

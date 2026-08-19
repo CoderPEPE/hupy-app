@@ -19,7 +19,7 @@ import {
 } from 'lucide-react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { usePlanets, useSaveStoryProgress, useStories } from '../api/hooks';
+import { usePlanets, useSaveStoryProgress, useStories, useStory } from '../api/hooks';
 import { AppTabBar } from '../components/AppTabBar';
 import { PlanetOrb } from '../components/PlanetOrb';
 import { Card, Dropdown, ScreenHeader } from '../components/ui';
@@ -41,7 +41,11 @@ function StoryPanel({ entry, planet }: { entry: StoryListEntry; planet: Planet |
   const t = useT();
   const user = useAuthStore((s) => s.user);
   const saveProgress = useSaveStoryProgress();
-  const story = entry.story;
+  // The list entry carries the story's metadata (title, duration, saved
+  // position) but not its transcript — that comes from the single-story
+  // endpoint, fetched only for the planet actually open in the player.
+  const { data: full } = useStory(entry.story ? entry.planet.id : undefined);
+  const story = entry.story ? { ...entry.story, ...(full ?? {}) } : null;
   const voice = effectiveVoice(user?.voice ?? '', user?.language ?? 'en');
 
   const units = story?.sentences ?? [];
@@ -59,10 +63,16 @@ function StoryPanel({ entry, planet }: { entry: StoryListEntry; planet: Planet |
   const elapsedRef = useRef(0);
   const speedRef = useRef(1);
   const cancelRef = useRef(false);
+  /** True while the playback loop is running. The `playing` state drives the
+   * UI; this drives control flow, because callbacks capture stale state. */
+  const playingRef = useRef(false);
 
   // Start from the saved position exactly where the learner stopped.
+  // Also runs when the transcript arrives: the units are what turn a saved
+  // number of seconds into a sentence index, and on first render they are
+  // still being fetched.
   useEffect(() => {
-    if (!story) return;
+    if (!story || units.length === 0) return;
     const start = story.completed ? 0 : Math.min(story.position_secs, totalSecs - 1);
     const i = indexForElapsed(units, start);
     indexRef.current = i;
@@ -74,7 +84,7 @@ function StoryPanel({ entry, planet }: { entry: StoryListEntry; planet: Planet |
       speechPlayer.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [story?.id]);
+  }, [story?.id, units.length]);
 
   const persist = (secs: number, completed = false) => {
     if (!story) return;
@@ -82,12 +92,21 @@ function StoryPanel({ entry, planet }: { entry: StoryListEntry; planet: Planet |
   };
 
   const play = async () => {
-    if (!story || playing) return;
+    // Guard on the ref, not the `playing` state: state is a snapshot of the
+    // render this closure was created in. `seekTo` restarts playback from a
+    // callback captured while `playing` was still true, so a state check
+    // there returned early and playback stopped for good — and a fast
+    // pause-then-play could get two loops running at once.
+    if (!story || playingRef.current) return;
+    playingRef.current = true;
     cancelRef.current = false;
     setPlaying(true);
     let i = indexRef.current;
     while (i < units.length) {
-      if (cancelRef.current) return;
+      if (cancelRef.current) {
+        playingRef.current = false;
+        return;
+      }
       indexRef.current = i;
       setIndex(i);
       const text = units[i];
@@ -99,6 +118,7 @@ function StoryPanel({ entry, planet }: { entry: StoryListEntry; planet: Planet |
       if (dur <= 0) await new Promise((r) => setTimeout(r, 350));
       i += 1;
     }
+    playingRef.current = false;
     if (!cancelRef.current) {
       setPlaying(false);
       elapsedRef.current = totalSecs;
@@ -109,6 +129,7 @@ function StoryPanel({ entry, planet }: { entry: StoryListEntry; planet: Planet |
 
   const stopPlayback = () => {
     cancelRef.current = true;
+    playingRef.current = false;
     speechPlayer.stop();
     setPlaying(false);
     persist(elapsedRef.current);
@@ -118,6 +139,7 @@ function StoryPanel({ entry, planet }: { entry: StoryListEntry; planet: Planet |
     const clamped = Math.max(0, Math.min(totalSecs, target));
     const wasPlaying = playing;
     cancelRef.current = true;
+    playingRef.current = false;
     speechPlayer.stop();
     const i = indexForElapsed(units, clamped);
     indexRef.current = i;

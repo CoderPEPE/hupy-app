@@ -19,8 +19,18 @@ pub struct Config {
     /// audience differs by platform, so all of them are listed; an empty
     /// list disables Google sign-in rather than accepting anything.
     pub google_client_ids: Vec<String>,
+    /// Every `aud` an Apple identity token may carry — the iOS bundle id,
+    /// plus any Service ID if a web flow is ever added. Empty disables
+    /// Sign in with Apple rather than accepting anything.
+    pub apple_client_ids: Vec<String>,
     /// Port the HTTP server binds to.
     pub port: u16,
+    /// Whether an upstream proxy (Railway's edge, a reverse proxy) is
+    /// terminating connections. When true the rate limiter keys on the
+    /// rightmost `X-Forwarded-For` hop instead of the socket peer, which is
+    /// the proxy for every request. Off by default: trusting the header
+    /// without a proxy in front lets any client forge unlimited buckets.
+    pub trust_proxy: bool,
     /// When set, CORS allows only this origin; unset means allow-all (fine
     /// for a native app).
     pub cors_origin: Option<String>,
@@ -66,9 +76,13 @@ impl Config {
 
         let jwt_secret =
             env::var("JWT_SECRET").map_err(|_| "JWT_SECRET must be set".to_string())?;
-        if jwt_secret.len() < 16 {
-            tracing::warn!(
-                "JWT_SECRET is weak or the default — set a long random value before going live"
+        // A weak or placeholder secret is a total authentication bypass —
+        // anyone can mint a token for any user id — so it must stop the boot
+        // rather than emit a warning nobody reads.
+        if jwt_secret.len() < 32 || jwt_secret == "change-me" {
+            return Err(
+                "JWT_SECRET must be a long random value — generate one with `openssl rand -hex 32`"
+                    .to_string(),
             );
         }
 
@@ -83,6 +97,18 @@ impl Config {
         if google_client_ids.is_empty() {
             tracing::warn!("GOOGLE_CLIENT_IDS is unset — Google sign-in will be rejected");
         }
+        let apple_client_ids = env::var("APPLE_CLIENT_IDS")
+            .unwrap_or_default()
+            .split(',')
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty())
+            .collect::<Vec<_>>();
+        if apple_client_ids.is_empty() {
+            tracing::warn!("APPLE_CLIENT_IDS is unset — Sign in with Apple will be rejected");
+        }
+        let trust_proxy = env::var("TRUST_PROXY")
+            .map(|v| matches!(v.trim(), "1" | "true" | "TRUE" | "yes"))
+            .unwrap_or(false);
         let port = env::var("PORT")
             .ok()
             .and_then(|p| p.parse().ok())
@@ -140,7 +166,9 @@ impl Config {
             jwt_secret,
             openai_api_key,
             google_client_ids,
+            apple_client_ids,
             port,
+            trust_proxy,
             cors_origin,
             tts_model,
             tts_voice,
@@ -168,11 +196,13 @@ mod tests {
     // they must never run concurrently with each other.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-    const ALL_VARS: [&str; 18] = [
+    const ALL_VARS: [&str; 20] = [
         "DATABASE_URL",
         "JWT_SECRET",
         "OPENAI_API_KEY",
         "GOOGLE_CLIENT_IDS",
+        "APPLE_CLIENT_IDS",
+        "TRUST_PROXY",
         "PORT",
         "CORS_ORIGIN",
         "TTS_MODEL",
@@ -225,6 +255,46 @@ mod tests {
     }
 
     #[test]
+    fn a_weak_or_placeholder_jwt_secret_refuses_to_boot() {
+        with_env(
+            || env::set_var("DATABASE_URL", "postgres://localhost/hupy"),
+            || {
+                // The value `.env.example` used to ship.
+                env::set_var("JWT_SECRET", "change-me");
+                assert!(Config::from_env().unwrap_err().contains("JWT_SECRET"));
+
+                // Long enough to look plausible, still too short to be safe.
+                env::set_var("JWT_SECRET", "0123456789abcdef");
+                assert!(Config::from_env().unwrap_err().contains("JWT_SECRET"));
+
+                // 32 hex chars — what `openssl rand -hex 32` produces.
+                env::set_var("JWT_SECRET", "0123456789abcdef0123456789abcdef");
+                assert!(Config::from_env().is_ok());
+            },
+        );
+    }
+
+    #[test]
+    fn trust_proxy_defaults_off_and_accepts_the_usual_truthy_spellings() {
+        with_env(
+            || {
+                env::set_var("DATABASE_URL", "postgres://localhost/hupy");
+                env::set_var("JWT_SECRET", "0123456789abcdef0123456789abcdef");
+                env::remove_var("TRUST_PROXY");
+            },
+            || {
+                assert!(!Config::from_env().unwrap().trust_proxy);
+                env::set_var("TRUST_PROXY", "true");
+                assert!(Config::from_env().unwrap().trust_proxy);
+                env::set_var("TRUST_PROXY", "1");
+                assert!(Config::from_env().unwrap().trust_proxy);
+                env::set_var("TRUST_PROXY", "false");
+                assert!(!Config::from_env().unwrap().trust_proxy);
+            },
+        );
+    }
+
+    #[test]
     fn defaults_apply_when_tunables_are_unset() {
         with_env(
             || {
@@ -239,6 +309,8 @@ mod tests {
                 assert_eq!(c.port, 3000);
                 assert_eq!(c.openai_api_key, "");
                 assert!(c.google_client_ids.is_empty());
+                assert!(c.apple_client_ids.is_empty());
+                assert!(!c.trust_proxy);
                 assert_eq!(c.cors_origin, None);
                 assert_eq!(c.tts_model, "gpt-4o-mini-tts");
                 assert_eq!(c.tts_voice, "marin");

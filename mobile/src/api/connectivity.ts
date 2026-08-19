@@ -19,6 +19,10 @@ export const HEALTH_TIMEOUT_MS = 6_000;
 export const ONLINE_POLL_MS = 15_000;
 /** While offline, poll faster so the screen clears itself when we're back. */
 export const OFFLINE_POLL_MS = 5_000;
+/** Consecutive failed probes before the app declares itself offline. Two at
+ * OFFLINE_POLL_MS means a real outage still surfaces within a few seconds,
+ * while a single slow response no longer kills an in-progress lesson. */
+export const FAILURES_BEFORE_OFFLINE = 2;
 
 /** One shot at `/health`. A timeout aborts instead of hanging on a dead route. */
 export async function pingHealth(): Promise<boolean> {
@@ -70,6 +74,11 @@ export function createConnectivityMonitor(options: {
   let inFlight = false;
   let disposed = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  /** Consecutive failed probes. One failure is not an outage: a cellular
+   * handoff, a VPN reconnect or a cold Railway container routinely exceeds
+   * HEALTH_TIMEOUT_MS, and flipping offline on the first miss tore down the
+   * navigator mid-lesson. */
+  let failures = 0;
 
   const check = async () => {
     if (inFlight || disposed) return;
@@ -78,12 +87,21 @@ export function createConnectivityMonitor(options: {
     inFlight = false;
     if (disposed) return;
 
-    status = ok ? 'online' : 'offline';
+    failures = ok ? 0 : failures + 1;
+    // Online again on the first success; offline only once the server has
+    // missed FAILURES_BEFORE_OFFLINE probes in a row.
+    if (ok) {
+      status = 'online';
+    } else if (failures >= FAILURES_BEFORE_OFFLINE) {
+      status = 'offline';
+    }
     options.onChange(status);
 
     // One timer at a time — a manual or foreground-triggered check supersedes
     // any scheduled one instead of stacking a second poll loop.
     if (timer) clearTimeout(timer);
+    // While failing but not yet declared offline, retry at the faster
+    // cadence so a real outage is still noticed promptly.
     timer = setTimeout(() => void check(), ok ? ONLINE_POLL_MS : OFFLINE_POLL_MS);
   };
 
@@ -94,6 +112,7 @@ export function createConnectivityMonitor(options: {
       // The retry's 'checking' phase keeps the offline screen up with a
       // spinner until the new result arrives (App.tsx's ConnectivityGate).
       status = 'checking';
+      failures = 0;
       options.onChange('checking');
       void check();
     },

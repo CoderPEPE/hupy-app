@@ -4,7 +4,7 @@ import {
   type RecordingConfig,
 } from '@siteed/audio-studio';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PermissionsAndroid, Platform } from 'react-native';
+import { AppState, PermissionsAndroid, Platform } from 'react-native';
 import { ApiError } from '../api/client';
 import { getRealtimeClientSecret } from '../api/realtime';
 import type { RealtimeSessionMode, RealtimeTool } from '../api/realtime';
@@ -106,6 +106,15 @@ const RECORDING_CONFIG: RecordingConfig = {
   streamFormat: 'float32',
   interval: 100,
   bufferDurationSeconds: 0.1,
+  // Streaming only. The library writes an uncompressed WAV of everything the
+  // microphone hears by default; we forward the PCM to the Realtime socket
+  // and never read that file, so it was pure unbounded disk growth — and a
+  // recording of the learner's voice sitting in the app container forever.
+  output: { primary: { enabled: false } },
+  // A phone call, Siri or an alarm suspends the audio session. Without this
+  // the recorder stays paused after the interruption ends, so the mic is dead
+  // for the rest of the lesson while the UI still says "listening".
+  autoResumeAfterInterruption: true,
   ios: {
     audioSession: {
       category: 'PlayAndRecord',
@@ -135,6 +144,9 @@ export function useVoiceConversation(
   const [error, setError] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+  // The socket handlers are installed once (empty dep list), so they reach
+  // teardown through a ref rather than closing over a stale callback.
+  const teardownSessionRef = useRef<(() => Promise<void>) | null>(null);
   // Always-current practice suffix (e.g. a specific sentence to drill), so
   // the frozen `start` callback never reads a stale closure.
   const suffixRef = useRef(opts?.instructionsSuffix ?? '');
@@ -548,8 +560,12 @@ async function ensureMicPermission(): Promise<boolean> {
     setConversationStatus(recordEnabledRef.current ? 'listening' : 'connected');
   }, []);
 
-  const stopInternal = useCallback(async () => {
-    setConversationStatus('idle');
+  /** Releases every resource the session holds, without deciding what the
+   * status becomes — the caller owns that. Split out of `stopInternal` so the
+   * socket's error/close handlers can free the microphone too: they used to
+   * only mark the UI as errored, leaving the native recorder running and the
+   * iOS orange mic indicator lit until the screen was unmounted. */
+  const teardownSession = useCallback(async () => {
     realtimeAudioPlayer.setSessionActive(false);
     try {
       await recorder.stopRecording();
@@ -571,6 +587,13 @@ async function ensureMicPermission(): Promise<boolean> {
       }
     }
   }, [recorder.stopRecording]);
+
+  teardownSessionRef.current = teardownSession;
+
+  const stopInternal = useCallback(async () => {
+    setConversationStatus('idle');
+    await teardownSession();
+  }, [teardownSession]);
 
   /** Opens the Realtime session. With `withMic` the microphone permission is
    * requested (Android) and the recorder starts as soon as the session is up;
@@ -694,17 +717,19 @@ async function ensureMicPermission(): Promise<boolean> {
     };
 
     ws.onerror = () => {
-      realtimeAudioPlayer.setSessionActive(false);
       setError(t('voice.connectionLost'));
       setConversationStatus('error');
+      // The session is over either way — let go of the microphone rather than
+      // leaving it recording into a socket nobody is reading.
+      void teardownSessionRef.current?.();
     };
 
     ws.onclose = () => {
-      realtimeAudioPlayer.setSessionActive(false);
       if (statusRef.current !== 'idle') {
         setError(t('voice.sessionEnded'));
         setConversationStatus('error');
       }
+      void teardownSessionRef.current?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -760,6 +785,23 @@ async function ensureMicPermission(): Promise<boolean> {
     },
     [],
   );
+
+  // End the session when the app leaves the foreground.
+  //
+  // The iOS audio session is PlayAndRecord and the app declares the `audio`
+  // background mode, so without this the microphone keeps streaming the
+  // learner's room to OpenAI after they switch apps or lock the phone — with
+  // the orange privacy indicator lit and no way to stop it from the UI.
+  // Unmounting is not enough: backgrounding does not unmount.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active' && statusRef.current !== 'idle') {
+        void stopInternal();
+      }
+    });
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Tear down on unmount.
   useEffect(() => {

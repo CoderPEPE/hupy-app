@@ -331,6 +331,13 @@ async fn completing_planet_one_unlocks_planet_two() {
     )
     .await;
     for module in detail["lessons"].as_array().unwrap() {
+        // Mastering every sentence above already closed the first module —
+        // that is the sentence-taught fallback path, and it closes *both*
+        // halves, so this module is done and is no longer the current one.
+        // Only the modules still open need driving here.
+        if module["state"] == "completed" {
+            continue;
+        }
         let id = module["id"].as_str().unwrap();
         let (status, body) = request(
             &app,
@@ -355,4 +362,67 @@ async fn completing_planet_one_unlocks_planet_two() {
     .await;
     assert_eq!(status.as_u16(), 200, "{body}");
     assert_eq!(body["status"], "available", "{body}");
+}
+
+/// A module taught from the planet's sentence list (no authored structures)
+/// completes when every sentence is mastered — and must close *both* halves.
+///
+/// Regression: it used to close only the conversation half. A module that
+/// minted no corrections has an empty deck, so nothing could ever set
+/// `flashcards_done`, and the module — and with it the planet — stayed
+/// permanently unfinishable.
+#[tokio::test]
+async fn mastering_every_sentence_closes_both_halves_of_the_module() {
+    let (app, token) = setup().await;
+
+    let (_, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.36.1").await;
+    let p1 = planets[0]["id"].as_str().unwrap().to_string();
+
+    let (_, detail) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{p1}"),
+        Some(&token),
+        None,
+        "10.0.36.2",
+    )
+    .await;
+    let first_module = detail["lessons"][0]["id"].as_str().unwrap().to_string();
+
+    for s in detail["sentences"].as_array().unwrap() {
+        let sid = s["id"].as_str().unwrap();
+        let (status, _) = request(
+            &app,
+            "POST",
+            &format!("/api/planets/{p1}/sentences/{sid}/master"),
+            Some(&token),
+            Some(json!({ "mastered": true })),
+            "10.0.36.3",
+        )
+        .await;
+        assert_eq!(status.as_u16(), 200);
+    }
+
+    let (status, after) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{p1}"),
+        Some(&token),
+        None,
+        "10.0.36.4",
+    )
+    .await;
+    assert_eq!(status.as_u16(), 200, "{after}");
+
+    let module = after["lessons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"].as_str() == Some(first_module.as_str()))
+        .expect("the module we mastered is still listed");
+    assert_eq!(
+        module["state"], "completed",
+        "mastering every sentence must finish the module outright, not strand \
+         it with an un-closable empty flashcard deck: {module}"
+    );
 }

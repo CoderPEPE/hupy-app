@@ -55,7 +55,12 @@ async fn produce(
 }
 
 /// The planet's modules, with each one's state.
-async fn modules(app: &common::Router, token: &str, planet_id: &str, ip: &str) -> Vec<serde_json::Value> {
+async fn modules(
+    app: &common::Router,
+    token: &str,
+    planet_id: &str,
+    ip: &str,
+) -> Vec<serde_json::Value> {
     let (_, detail) = request(
         app,
         "GET",
@@ -176,7 +181,10 @@ async fn three_productions_finish_each_structure_and_close_the_module() {
     let body = produce(&app, &token, &m1_id, "Good morning.", 2, "10.0.65.4").await;
     assert_eq!(body["productions"], 3, "capped at the requirement");
     assert_eq!(body["done_count"], 1);
-    assert_eq!(body["conversation_done"], false, "one of two structures is not enough");
+    assert_eq!(
+        body["conversation_done"], false,
+        "one of two structures is not enough"
+    );
 
     // …and a re-call on a finished structure must not farm an endless count.
     let body = produce(&app, &token, &m1_id, "Good morning.", 1, "10.0.65.5").await;
@@ -184,7 +192,15 @@ async fn three_productions_finish_each_structure_and_close_the_module() {
     assert_eq!(body["done_count"], 1);
 
     // The planet detail exposes the checkpoint to the app's progress bar.
-    let (_, detail) = request(&app, "GET", &format!("/api/planets/{p1}"), Some(&token), None, "10.0.65.6").await;
+    let (_, detail) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{p1}"),
+        Some(&token),
+        None,
+        "10.0.65.6",
+    )
+    .await;
     let s0 = &detail["lessons"][0]["structures"][0];
     assert_eq!(s0["target"], "Good morning.");
     assert_eq!(s0["productions"], 3);
@@ -193,8 +209,14 @@ async fn three_productions_finish_each_structure_and_close_the_module() {
     // Drilling the second structure 3 times closes the conversation.
     let body = produce(&app, &token, &m1_id, "I am fine.", 3, "10.0.65.7").await;
     assert_eq!(body["all_structures_done"], true);
-    assert_eq!(body["conversation_done"], true, "module closes automatically");
-    assert_eq!(body["flashcards_done"], true, "no cards minted, nothing to review");
+    assert_eq!(
+        body["conversation_done"], true,
+        "module closes automatically"
+    );
+    assert_eq!(
+        body["flashcards_done"], true,
+        "no cards minted, nothing to review"
+    );
 
     let list = modules(&app, &token, &p1, "10.0.65.8").await;
     assert_eq!(list[0]["state"], "completed");
@@ -218,8 +240,19 @@ async fn productions_survive_a_restart_and_resume_at_the_checkpoint() {
 
     // "Closing the app": a brand-new request path (fresh detail fetch) sees
     // 2/3 on the first structure and zero on the second.
-    let (_, detail) = request(&app, "GET", &format!("/api/planets/{p1}"), Some(&token), None, "10.0.66.4").await;
-    let structures = detail["lessons"][0]["structures"].as_array().unwrap().clone();
+    let (_, detail) = request(
+        &app,
+        "GET",
+        &format!("/api/planets/{p1}"),
+        Some(&token),
+        None,
+        "10.0.66.4",
+    )
+    .await;
+    let structures = detail["lessons"][0]["structures"]
+        .as_array()
+        .unwrap()
+        .clone();
     assert_eq!(structures[0]["productions"], 2);
     assert_eq!(structures[0]["done"], false);
     assert_eq!(structures[1]["productions"], 0);
@@ -355,7 +388,8 @@ async fn the_audio_story_unlocks_when_every_module_is_done() {
                 .unwrap()
                 .clone();
             assert_eq!(
-                entry["unlocked"], false,
+                entry["unlocked"],
+                false,
                 "story leaked after module {}",
                 i + 1
             );

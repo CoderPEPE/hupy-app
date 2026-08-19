@@ -28,6 +28,9 @@ export const colors = {
 
   // Surfaces
   background: '#FFFFFF',
+  /** Lavender page tint the Home dashboard sits on, so its white cards read
+   * as raised rather than blending into the page. */
+  backgroundSoft: '#F5F4FE',
   surface: '#F7F7F7',
   surfaceElevated: '#FFFFFF',
   border: '#E5E5E5',

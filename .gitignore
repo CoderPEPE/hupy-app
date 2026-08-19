@@ -8,3 +8,13 @@
 
 # MCP config (local only)
 .mcp.json
+
+# Secrets. docs/DEPLOYMENT.md has you create a root .env holding JWT_SECRET,
+# OPENAI_API_KEY and the database password — it must never be committed.
+.env
+.env.*
+!.env.example
+# Deliberately tracked: it holds only public identifiers (the HTTPS API URL
+# and OAuth client IDs, which ship inside the app binary anyway), and EAS
+# Build needs it present to inline EXPO_PUBLIC_* at bundle time.
+!mobile/.env

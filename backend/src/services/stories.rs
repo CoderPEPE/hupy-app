@@ -439,7 +439,13 @@ pub fn parse_story(content: &str) -> Result<StoryText> {
             continue;
         }
         sentences.push(text.to_string());
-        translation.push(unit["translation"].as_str().unwrap_or("").trim().to_string());
+        translation.push(
+            unit["translation"]
+                .as_str()
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+        );
     }
     if sentences.is_empty() {
         return Err(AppError::internal("story JSON contained no usable units"));
@@ -556,8 +562,16 @@ mod tests {
     #[test]
     fn earlier_phrases_are_reviewed_before_the_ending() {
         let p = planet(12);
-        let review = vec![("I am from Brazil.".to_string(), "Sou do Brasil.".to_string())];
-        let story = build_story(&p, &[chunk("I clean the house.", "Limpo a casa.")], &review, "Ana");
+        let review = vec![(
+            "I am from Brazil.".to_string(),
+            "Sou do Brasil.".to_string(),
+        )];
+        let story = build_story(
+            &p,
+            &[chunk("I clean the house.", "Limpo a casa.")],
+            &review,
+            "Ana",
+        );
         assert_eq!(story.sentences.len(), story.translation.len());
         let review_at = story
             .sentences

@@ -12,10 +12,16 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-hupy}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hupy}
+      # No default: a database reachable with a password published in this
+      # repo is not a database. User and DB name are not secrets and stay
+      # defaulted.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env - openssl rand -hex 32}
       POSTGRES_DB: ${POSTGRES_DB:-hupy}
-    ports:
-      - "5432:5432"
+    # Deliberately not published to the host: the api service reaches
+    # Postgres over the compose network as db:5432. If you want local psql
+    # access, add `ports: ["127.0.0.1:5432:5432"]` — bound to loopback, never
+    # 0.0.0.0, which would expose the database to anything that can route to
+    # this host.
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -30,7 +36,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-hupy}:${POSTGRES_PASSWORD:-hupy}@db:5432/${POSTGRES_DB:-hupy}
+      DATABASE_URL: postgres://${POSTGRES_USER:-hupy}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-hupy}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env - openssl rand -hex 32}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       PORT: "3000"

@@ -1,6 +1,6 @@
 import { AudioBufferSourceNode, AudioContext } from 'react-native-audio-api';
 import { getSpeech } from '../api/tts';
-import { configureIosSession } from './audioEngine';
+import { configureIosSession, configurePlaybackSession, realtimeAudioPlayer } from './audioEngine';
 
 /**
  * Plays short TTS clips (flashcard "Listen", correction "Hear it", planet
@@ -20,7 +20,10 @@ class SpeechPlayer {
 
   private async getContext(): Promise<AudioContext> {
     if (!this.context) {
-      configureIosSession();
+      // Full-quality playback unless a live conversation owns the session,
+      // in which case its mic-preserving options have to stay.
+      if (realtimeAudioPlayer.isSessionActive) configureIosSession();
+      else configurePlaybackSession();
       this.context = new AudioContext();
       await this.context.resume();
     }

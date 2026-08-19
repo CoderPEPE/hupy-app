@@ -5,7 +5,7 @@
 
 use crate::state::AppState;
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -61,15 +61,43 @@ fn rate_limited() -> Response {
         .into_response()
 }
 
+/// Resolves the bucket key for a caller.
+///
+/// The socket peer is the honest answer only when the process is reachable
+/// directly. Behind a proxy (Railway's edge, an nginx in front) it is the
+/// proxy for *every* request, which collapses the whole user base into one
+/// bucket — so with `TRUST_PROXY` set we take the client address the proxy
+/// recorded instead.
+///
+/// The rightmost `X-Forwarded-For` entry is the one the trusted hop appended;
+/// entries to its left are whatever the client sent and are freely forgeable,
+/// so reading the leftmost would let anyone mint unlimited buckets and turn
+/// the limiter off.
+pub fn client_key(trust_proxy: bool, headers: &HeaderMap, addr: &SocketAddr) -> String {
+    if trust_proxy {
+        if let Some(ip) = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|xff| xff.rsplit(',').next())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            return ip.to_string();
+        }
+    }
+    addr.ip().to_string()
+}
+
 /// The shared guard body: one `allow()` against the given limiter, keyed by
-/// the caller's socket IP.
+/// the caller's resolved client address.
 async fn enforce(
     limiter: &RateLimiter,
+    trust_proxy: bool,
     addr: &SocketAddr,
     request: Request,
     next: Next,
 ) -> Response {
-    if !limiter.allow(&addr.ip().to_string()) {
+    if !limiter.allow(&client_key(trust_proxy, request.headers(), addr)) {
         return rate_limited();
     }
     next.run(request).await
@@ -83,7 +111,14 @@ pub async fn auth_ratelimit(
     request: Request,
     next: Next,
 ) -> Response {
-    enforce(&state.auth_limiter, &addr, request, next).await
+    enforce(
+        &state.auth_limiter,
+        state.config.trust_proxy,
+        &addr,
+        request,
+        next,
+    )
+    .await
 }
 
 /// Guards the learning write endpoints (conversations, flashcards, planets)
@@ -95,7 +130,14 @@ pub async fn write_ratelimit(
     request: Request,
     next: Next,
 ) -> Response {
-    enforce(&state.write_limiter, &addr, request, next).await
+    enforce(
+        &state.write_limiter,
+        state.config.trust_proxy,
+        &addr,
+        request,
+        next,
+    )
+    .await
 }
 
 /// Guards /api/tts so a single account can't burn OpenAI credits at will.
@@ -105,13 +147,70 @@ pub async fn tts_ratelimit(
     request: Request,
     next: Next,
 ) -> Response {
-    enforce(&state.tts_limiter, &addr, request, next).await
+    enforce(
+        &state.tts_limiter,
+        state.config.trust_proxy,
+        &addr,
+        request,
+        next,
+    )
+    .await
 }
 
 #[cfg(test)]
 mod tests {
-    use super::RateLimiter;
+    use super::{client_key, RateLimiter};
+    use axum::http::HeaderMap;
+    use std::net::SocketAddr;
     use std::time::Duration;
+
+    fn headers(xff: Option<&str>) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        if let Some(v) = xff {
+            h.insert("x-forwarded-for", v.parse().unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn without_trust_proxy_the_socket_peer_is_the_key() {
+        let addr: SocketAddr = "203.0.113.7:54321".parse().unwrap();
+        // Even a forged header is ignored when no proxy is declared.
+        assert_eq!(
+            client_key(false, &headers(Some("1.2.3.4")), &addr),
+            "203.0.113.7"
+        );
+    }
+
+    #[test]
+    fn with_trust_proxy_the_rightmost_forwarded_hop_wins() {
+        let addr: SocketAddr = "10.0.0.1:443".parse().unwrap();
+        // The leftmost entries are client-supplied; only the last one was
+        // appended by the trusted edge, so a spoofer cannot mint buckets.
+        assert_eq!(
+            client_key(
+                true,
+                &headers(Some("1.2.3.4, 5.6.7.8, 198.51.100.9")),
+                &addr
+            ),
+            "198.51.100.9"
+        );
+        assert_eq!(
+            client_key(true, &headers(Some("198.51.100.9")), &addr),
+            "198.51.100.9"
+        );
+    }
+
+    #[test]
+    fn with_trust_proxy_a_missing_or_empty_header_falls_back_to_the_peer() {
+        let addr: SocketAddr = "10.0.0.1:443".parse().unwrap();
+        assert_eq!(client_key(true, &headers(None), &addr), "10.0.0.1");
+        assert_eq!(client_key(true, &headers(Some("")), &addr), "10.0.0.1");
+        assert_eq!(
+            client_key(true, &headers(Some("1.2.3.4,  ")), &addr),
+            "10.0.0.1"
+        );
+    }
 
     #[test]
     fn allows_under_limit_and_rejects_over() {

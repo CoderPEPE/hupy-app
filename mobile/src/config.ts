@@ -27,3 +27,16 @@ export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? DEV_BASE_URL;
  */
 export const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '';
 export const GOOGLE_IOS_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '';
+
+/**
+ * Where the published Privacy Policy and Terms of Use live.
+ *
+ * App Review requires an in-app, working privacy-policy link for any app that
+ * supports account creation (Guideline 5.1.1(i)) — these back the links on the
+ * sign-up screen and in Profile. The documents themselves are the ones in
+ * `landing/` of this repo; host them and point these at the live URLs.
+ */
+export const PRIVACY_URL =
+  process.env.EXPO_PUBLIC_PRIVACY_URL ?? 'https://coderpepe.github.io/hupy-app/privacy.html';
+export const TERMS_URL =
+  process.env.EXPO_PUBLIC_TERMS_URL ?? 'https://coderpepe.github.io/hupy-app/terms.html';

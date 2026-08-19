@@ -47,6 +47,31 @@ export function googleLogin(idToken: string, baseLanguage?: string, language?: s
   });
 }
 
+/** Exchanges an Apple identity token for a session, creating the account on
+ * first sign-in. Apple only hands over the learner's name in that first
+ * authorization, so it travels separately from the token. */
+export function appleLogin(
+  identityToken: string,
+  name?: string,
+  baseLanguage?: string,
+  language?: string,
+) {
+  return apiRequest<AuthResponse>('/api/auth/apple', {
+    method: 'POST',
+    body: { identity_token: identityToken, name, base_language: baseLanguage, language },
+  });
+}
+
+/** Reports the device's UTC offset so the daily streak is counted on the
+ * learner's own calendar rather than UTC's. */
+export function setTimezone(utcOffsetMinutes: number) {
+  return apiRequest<User>('/api/auth/timezone', {
+    method: 'POST',
+    auth: true,
+    body: { utc_offset_minutes: utcOffsetMinutes },
+  });
+}
+
 /** Exchanges the stored refresh token for a fresh access JWT + next refresh
  * token. The presented token is single-use: this response is the only
  * successor. */

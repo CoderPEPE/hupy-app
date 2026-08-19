@@ -42,11 +42,11 @@ export function PermissionModal({
           <Text style={styles.title}>{t('permissionModal.title')}</Text>
           <Text style={styles.body}>{t('permissionModal.body')}</Text>
 
-          <Pressable style={styles.button} onPress={onContinue}>
+          {/* One permission, one button. The second said "Enable speech
+              recognition" and ran the same handler — the app never requests
+              that permission, so it promised something it does not do. */}
+          <Pressable style={styles.button} onPress={onContinue} accessibilityRole="button">
             <Text style={styles.buttonText}>{t('permissionModal.unlockMic')}</Text>
-          </Pressable>
-          <Pressable style={styles.button} onPress={onContinue}>
-            <Text style={styles.buttonText}>{t('permissionModal.unlockSpeech')}</Text>
           </Pressable>
         </View>
       </View>

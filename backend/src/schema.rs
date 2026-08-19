@@ -344,6 +344,7 @@ diesel::table! {
         base_language -> Varchar,
         #[max_length = 120]
         name -> Varchar,
+        utc_offset_minutes -> Int4,
     }
 }
 

@@ -140,7 +140,10 @@ async fn main() {
         .into_iter()
         .collect();
 
-    let course = args.course.as_deref().map(|c| split_course(c).expect("validated"));
+    let course = args
+        .course
+        .as_deref()
+        .map(|c| split_course(c).expect("validated"));
     let mut todo: Vec<Planet> = planets
         .into_iter()
         .filter(|p| args.force || !seeded.contains(&p.id))
@@ -157,7 +160,10 @@ async fn main() {
     }
 
     let total = todo.len();
-    println!("{total} stories to write ({model}, {} at a time)", args.concurrency);
+    println!(
+        "{total} stories to write ({model}, {} at a time)",
+        args.concurrency
+    );
     if total == 0 {
         return;
     }
@@ -167,7 +173,8 @@ async fn main() {
     let mut tasks = Vec::with_capacity(total);
 
     for planet in todo {
-        let (pool, http, model, api_key) = (pool.clone(), http.clone(), model.clone(), api_key.clone());
+        let (pool, http, model, api_key) =
+            (pool.clone(), http.clone(), model.clone(), api_key.clone());
         let (done, semaphore) = (done.clone(), semaphore.clone());
         tasks.push(tokio::spawn(async move {
             let _permit = semaphore.acquire().await.expect("semaphore closed");

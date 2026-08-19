@@ -208,16 +208,19 @@ fn prompt_for(planet: &Planet, modules: &[PlanetLesson], target: &str, base: &st
          Give them in {target} (translate the concept — do not leave English lemmas in a \
          non-English course).\n\n\
          PLANET: {} — {}\nCommunication goal: {}\n\n",
-        planet.number, planet.level, slots[0], slots[1], slots[2], planet.title, planet.subtitle,
+        planet.number,
+        planet.level,
+        slots[0],
+        slots[1],
+        slots[2],
+        planet.title,
+        planet.subtitle,
         planet.goal,
     );
     out.push_str("THE TEN MODULES — write chunks for each, in this exact order:\n");
     for module in modules {
         let (focus, description) = curriculum::module_role(module.position, &slots);
-        out.push_str(&format!(
-            "{}. [{focus}] {description}\n",
-            module.position
-        ));
+        out.push_str(&format!("{}. [{focus}] {description}\n", module.position));
     }
     out.push_str(&format!(
         "\nRULES:\n\

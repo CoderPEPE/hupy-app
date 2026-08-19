@@ -61,6 +61,29 @@ fn strings(v: &serde_json::Value) -> Vec<String> {
 }
 
 impl StoryJson {
+    /// The library-list shape: everything needed to render a row, with the
+    /// transcript left empty. Clients fetch `GET /api/stories/{planet_id}`
+    /// for the text when the learner actually opens a story — sending every
+    /// unlocked planet's full narration on a list request moved megabytes
+    /// per screen load over mobile data.
+    fn from_summary(
+        seed: &repositories::story_seeds::StorySeedSummary,
+        progress: Option<&PlanetStory>,
+    ) -> Self {
+        Self {
+            id: seed.id,
+            title: seed.title.clone(),
+            status: "ready".into(),
+            sentences: Vec::new(),
+            translation: Vec::new(),
+            duration_secs: seed.duration_secs,
+            position_secs: progress.map(|p| p.position_secs).unwrap_or(0),
+            completed: progress.is_some_and(|p| p.completed),
+            created_at: seed.created_at,
+            updated_at: seed.updated_at,
+        }
+    }
+
     /// The planet's seeded story, carrying this learner's playback position
     /// when they have one. The transcript always comes from the seed, so a
     /// re-seeded story reaches everyone without rewriting their rows.
@@ -129,9 +152,16 @@ async fn list_stories(
     let stories = repositories::stories::list_for_user(&state.pool, user_id).await?;
     let by_planet: std::collections::HashMap<Uuid, PlanetStory> =
         stories.into_iter().map(|s| (s.planet_id, s)).collect();
-    let seeds = repositories::story_seeds::all(&state.pool).await?;
-    let seed_by_planet: std::collections::HashMap<Uuid, PlanetStorySeed> =
-        seeds.into_iter().map(|s| (s.planet_id, s)).collect();
+    let seeds = repositories::story_seeds::summaries_for_course(
+        &state.pool,
+        &user.base_language,
+        &user.language,
+    )
+    .await?;
+    let seed_by_planet: std::collections::HashMap<
+        Uuid,
+        repositories::story_seeds::StorySeedSummary,
+    > = seeds.into_iter().map(|s| (s.planet_id, s)).collect();
 
     // The story is the planet's reward: it opens when all ten modules are
     // finished (conversation + flashcards each), not when a mastery average
@@ -150,7 +180,7 @@ async fn list_stories(
         let story = if unlocked {
             seed_by_planet
                 .get(&p.id)
-                .map(|seed| StoryJson::from_seed(seed, listened))
+                .map(|seed| StoryJson::from_summary(seed, listened))
         } else {
             None
         };
@@ -170,6 +200,25 @@ async fn list_stories(
     Ok(Json(out))
 }
 
+/// Whether this learner has earned the planet's story.
+///
+/// The list endpoint withholds locked transcripts; without the same check
+/// here, `GET /api/stories/{planet_id}` handed the full narration of any
+/// planet to anyone who asked, which is exactly the spoiler the gate exists
+/// to prevent. Already having a progress row counts — that is what makes a
+/// story stay readable once it has been opened.
+async fn story_unlocked(state: &AppState, user_id: Uuid, planet_id: Uuid) -> Result<bool> {
+    if repositories::stories::find(&state.pool, user_id, planet_id)
+        .await?
+        .is_some()
+    {
+        return Ok(true);
+    }
+    let completed = repositories::modules::completed_counts_by_planet(&state.pool, user_id).await?;
+    Ok(completed.get(&planet_id).copied().unwrap_or(0)
+        >= services::curriculum::MODULES_PER_PLANET as i64)
+}
+
 async fn get_story(
     State(state): State<AppState>,
     AuthUser(user_id): AuthUser,
@@ -178,6 +227,11 @@ async fn get_story(
     let seed = repositories::story_seeds::find(&state.pool, planet_id)
         .await?
         .ok_or_else(|| AppError::not_found("story not found"))?;
+    // Indistinguishable from a missing story: a locked planet must not be
+    // detectable as "exists but withheld".
+    if !story_unlocked(&state, user_id, planet_id).await? {
+        return Err(AppError::not_found("story not found"));
+    }
     let listened = repositories::stories::find(&state.pool, user_id, planet_id).await?;
     Ok(Json(StoryJson::from_seed(&seed, listened.as_ref())))
 }
@@ -194,6 +248,9 @@ async fn save_progress(
     let seed = repositories::story_seeds::find(&state.pool, planet_id)
         .await?
         .ok_or_else(|| AppError::not_found("story not found"))?;
+    if !story_unlocked(&state, user_id, planet_id).await? {
+        return Err(AppError::not_found("story not found"));
+    }
 
     // First listen: the learner has no row yet. Create one from the seed so
     // there is something to hang the position on — the transcript itself is

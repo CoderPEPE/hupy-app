@@ -11,9 +11,9 @@ use crate::errors::{AppError, Result};
 use crate::models::UserStats;
 use crate::schema::{
     badges, card_reviews, conversations, corrections, flashcards, messages, planets, user_badges,
-    user_planet_progress, user_sentence_progress, user_stats,
+    user_sentence_progress, user_stats,
 };
-use chrono::Utc;
+use chrono::{DateTime, Duration, NaiveDate, Utc};
 use diesel::prelude::*;
 use diesel::Connection;
 use diesel::OptionalExtension;
@@ -82,14 +82,10 @@ pub fn compute_metrics(
     // Modules a learner has actually finished — conversation and flashcards
     // both — rather than a reading of the mastery average.
     let module_rows: Vec<(i32, i64)> = crate::schema::user_module_progress::table
-        .inner_join(
-            crate::schema::planet_lessons::table
-                .on(crate::schema::planet_lessons::id
-                    .eq(crate::schema::user_module_progress::lesson_id)),
-        )
-        .inner_join(
-            planets::table.on(planets::id.eq(crate::schema::planet_lessons::planet_id)),
-        )
+        .inner_join(crate::schema::planet_lessons::table.on(
+            crate::schema::planet_lessons::id.eq(crate::schema::user_module_progress::lesson_id),
+        ))
+        .inner_join(planets::table.on(planets::id.eq(crate::schema::planet_lessons::planet_id)))
         .filter(crate::schema::user_module_progress::user_id.eq(user_id))
         .filter(crate::schema::user_module_progress::conversation_done.eq(true))
         .filter(crate::schema::user_module_progress::flashcards_done.eq(true))
@@ -106,28 +102,14 @@ pub fn compute_metrics(
     }
     let lessons_completed = planet_lessons.values().sum();
 
-    // "Conquered" here must mean exactly what the Planets tab means by it
-    // (spec §5): past the mastery bar *and* no essential skill below the
-    // floor — otherwise a planet badge could fire for a planet still showing
-    // a pending review. The rounding tolerance mirrors
-    // `services::planets::at_least`.
-    let eps = 1e-9;
-    let floor = crate::services::planets::MIN_ESSENTIAL_SKILL - eps;
-    let planets_completed: i64 = planets::table
-        .inner_join(
-            user_planet_progress::table.on(user_planet_progress::planet_id
-                .eq(planets::id)
-                .and(user_planet_progress::user_id.eq(user_id))),
-        )
-        .filter(user_planet_progress::mastery.ge(planets::unlock_mastery - eps))
-        .filter(user_planet_progress::sentences.ge(floor))
-        .filter(user_planet_progress::listening.ge(floor))
-        .filter(user_planet_progress::pronunciation.ge(floor))
-        .filter(user_planet_progress::conversation.ge(floor))
-        .select(planets::number)
-        .distinct()
-        .count()
-        .get_result(conn)?;
+    // "Conquered" must mean exactly what the Planets tab means by it: all ten
+    // modules finished. It used to read the retired mastery average instead,
+    // so a planet badge could fire for a planet the UI still showed as
+    // in-progress (and vice versa). The counts above are already the gate.
+    let planets_completed: i64 = planet_lessons
+        .values()
+        .filter(|done| **done >= crate::services::curriculum::MODULES_PER_PLANET as i64)
+        .count() as i64;
 
     Ok(Metrics {
         corrections: corrections::table
@@ -218,12 +200,21 @@ pub async fn touch_activity_and_award_xp(pool: &DbPool, user_id: Uuid, xp_delta:
     }
 }
 
+/// The calendar date `now` falls on for someone `offset_minutes` east of UTC.
+///
+/// Clamped to the range real zones occupy (UTC-14 .. UTC+14) so a bad or
+/// hostile value from the client cannot shift a learner's day arbitrarily —
+/// the column has the same CHECK, this is the belt to its braces.
+fn local_date(now: DateTime<Utc>, offset_minutes: i32) -> NaiveDate {
+    (now + Duration::minutes(offset_minutes.clamp(-840, 840) as i64)).date_naive()
+}
+
 async fn touch_activity_and_award_xp_inner(
     pool: &DbPool,
     user_id: Uuid,
     xp_delta: i32,
 ) -> Result<()> {
-    let today = Utc::now().date_naive();
+    let now = Utc::now();
 
     run_db(pool, move |conn| {
         // The whole bookkeeping runs in one transaction with the stats row
@@ -252,6 +243,16 @@ async fn touch_activity_and_award_xp_inner(
                 .find(user_id)
                 .for_update()
                 .first::<UserStats>(conn)?;
+
+            // Count the day on the learner's own calendar. On UTC, an evening
+            // session anywhere west of Greenwich lands on tomorrow's date and
+            // either breaks the streak or silently skips a day.
+            let offset_minutes: i32 = crate::schema::users::table
+                .find(user_id)
+                .select(crate::schema::users::utc_offset_minutes)
+                .first(conn)
+                .unwrap_or(0);
+            let today = local_date(now, offset_minutes);
 
             let streak_days = match current.last_active_date {
                 Some(last) if last == today => current.streak_days.max(1),
@@ -336,7 +337,8 @@ fn write_stats(conn: &mut PgConnection, s: &UserStats) -> QueryResult<usize> {
 
 #[cfg(test)]
 mod tests {
-    use super::{earned_rules, Metrics, Rule};
+    use super::{earned_rules, local_date, Metrics, Rule};
+    use chrono::{DateTime, NaiveDate, Utc};
     use uuid::Uuid;
 
     fn rule(metric: &str, threshold: i32, scope: Option<i32>) -> Rule {
@@ -379,6 +381,52 @@ mod tests {
         m.planet_lessons.insert(1, 4);
         m.planet_lessons.insert(2, 2);
         assert_eq!(earned_rules(&rules, &m).len(), 1);
+    }
+
+    #[test]
+    fn a_late_evening_session_counts_as_today_in_the_learners_own_zone() {
+        // 23:30 on the 10th in Brazil (UTC-3) is 02:30 on the 11th in UTC.
+        // Counted on UTC the learner loses the day they just practised.
+        let utc = "2026-08-11T02:30:00Z".parse::<DateTime<Utc>>().unwrap();
+        assert_eq!(
+            local_date(utc, -180),
+            NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(),
+        );
+        assert_eq!(
+            local_date(utc, 0),
+            NaiveDate::from_ymd_opt(2026, 8, 11).unwrap(),
+            "UTC is what the old behavior used, and why the streak broke",
+        );
+    }
+
+    #[test]
+    fn local_date_handles_zones_east_of_utc_and_half_hour_offsets() {
+        // 08:00 UTC is already the 11th in Auckland (+720) and India (+330).
+        let utc = "2026-08-10T20:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        assert_eq!(
+            local_date(utc, 720),
+            NaiveDate::from_ymd_opt(2026, 8, 11).unwrap(),
+        );
+        assert_eq!(
+            local_date(utc, 330),
+            NaiveDate::from_ymd_opt(2026, 8, 11).unwrap(),
+        );
+    }
+
+    #[test]
+    fn an_absurd_offset_cannot_shift_the_day_arbitrarily() {
+        let utc = "2026-08-10T12:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        // Clamped to UTC+14 / UTC-14, so the day can move by at most one in
+        // either direction: 12:00 UTC becomes 02:00 on the 11th, or 22:00 on
+        // the 9th. Without the clamp a hostile value could pick any date.
+        assert_eq!(
+            local_date(utc, i32::MAX),
+            NaiveDate::from_ymd_opt(2026, 8, 11).unwrap(),
+        );
+        assert_eq!(
+            local_date(utc, i32::MIN),
+            NaiveDate::from_ymd_opt(2026, 8, 9).unwrap(),
+        );
     }
 
     #[test]

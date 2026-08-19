@@ -753,7 +753,10 @@ mod learner_name_tests {
             .replace("{{LEARNER}}", "Ana")
             .replace("{{TARGET_LANG}}", "English")
             .replace("{{BASE_LANG}}", "Portuguese");
-        assert!(rendered.contains("record_production"), "the tutor logs productions");
+        assert!(
+            rendered.contains("record_production"),
+            "the tutor logs productions"
+        );
         assert!(
             rendered.contains("closes automatically"),
             "completion is the system's job, not the model's"

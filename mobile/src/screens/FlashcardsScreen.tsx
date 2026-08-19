@@ -1,40 +1,16 @@
-import {
-  BookOpen,
-  Calendar,
-  CheckCircle2,
-  ChevronRight,
-  Layers,
-  Lightbulb,
-  Loader2,
-  Mic,
-  RefreshCw,
-  Star,
-  Volume2,
-} from 'lucide-react-native';
+import { BookOpen, CheckCircle2, ChevronRight, Layers, Loader2, RefreshCw, Star } from 'lucide-react-native';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Svg, { Circle as SvgCircle, Path as SvgPath } from 'react-native-svg';
+import { Animated, Easing, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AppTabBar } from '../components/AppTabBar';
 import { ProgressBar } from '../components/ProgressBar';
 import { Card, ScreenHeader } from '../components/ui';
 import { StreakXpBar } from '../components/StreakXpBar';
-import {
-  useAddCorrection,
-  useCreateConversation,
-  useCreateFlashcard,
-  usePlanet,
-  useFlashcards,
-  usePlanets,
-  useReviewFlashcard,
-} from '../api/hooks';
-import { localeTag, plural, useI18nStore, useT, type TranslationKey } from '../i18n';
+import { usePlanet, useFlashcards, usePlanets, useReviewFlashcard } from '../api/hooks';
+import { plural, useT, type TranslationKey } from '../i18n';
 import { planetOrbSource } from '../planets/planetLevels';
-import { useAuthStore } from '../store/auth';
 import { useUiStore } from '../store/ui';
 import { colors, radius, shadows, spacing, typography } from '../theme';
-import { useVoiceConversation, type ToolCallHandler } from '../voice/useVoiceConversation';
-import { effectiveVoice, speechPlayer } from '../voice/ttsPlayer';
 import { currentPlanet, type CardRating, type Flashcard } from '../types';
 
 /** "Não lembrei" has no separate backend tier (the SRS schedule only knows
@@ -84,290 +60,12 @@ function RatingButtons({ card, onRated }: { card: Flashcard; onRated: () => void
   );
 }
 
-/** Small forgetting-curve sparkline derived from the card's own SRS state
- * (ease + interval) — not decorative filler, it reflects real retention:
- * a higher ease/interval means the curve decays more slowly. */
-const AXIS_KEYS: TranslationKey[] = [
-  'flashcards.axisToday',
-  'flashcards.axisPlus1',
-  'flashcards.axisPlus3',
-  'flashcards.axisPlus5',
-  'flashcards.axisPlus7',
-  'flashcards.axisPlus14',
-  'flashcards.axisPlus30',
-];
-
-function RetentionGraph({ card }: { card: Flashcard }) {
-  const t = useT();
-  const w = 180;
-  const h = 70;
-  const points = useMemo(() => {
-    const decay = Math.max(0.15, Math.min(0.9, card.ease / 3));
-    const steps = AXIS_KEYS.length;
-    return Array.from({ length: steps }, (_, i) => {
-      const x = (w / (steps - 1)) * i;
-      const progress = i / (steps - 1);
-      const y = h - h * (0.1 + decay * (1 - progress) ** 1.6 * 0.85 + (1 - decay) * 0.05);
-      return { x, y };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [card.ease]);
-
-  const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
-
-  return (
-    <View style={styles.retentionSection}>
-      <Text style={styles.retentionLabel}>{t('flashcards.retention')}</Text>
-      <View style={styles.retentionRow}>
-        <View style={styles.yAxis}>
-          <Text style={styles.axisText}>100%</Text>
-          <Text style={styles.axisText}>50%</Text>
-          <Text style={styles.axisText}>0%</Text>
-        </View>
-        <View>
-          <Svg width={w} height={h}>
-            <SvgPath d={path} stroke={colors.primary} strokeWidth={2.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
-            {points.map((p, i) => (
-              <SvgCircle key={i} cx={p.x} cy={p.y} r={i === points.length - 1 ? 3.5 : 2} fill={colors.primary} />
-            ))}
-          </Svg>
-          <View style={styles.xAxis}>
-            {AXIS_KEYS.map((key) => (
-              <Text key={key} style={styles.axisText}>
-                {t(key)}
-              </Text>
-            ))}
-          </View>
-        </View>
-        <NextReviewBadge card={card} />
-      </View>
-    </View>
-  );
-}
-
-function NextReviewBadge({ card }: { card: Flashcard }) {
-  const t = useT();
-  const locale = useI18nStore((s) => s.locale);
-  const date = new Date(card.next_review_at).toLocaleDateString(localeTag(locale), {
-    day: '2-digit',
-    month: 'short',
-  });
-  const days = Math.max(0, Math.ceil((new Date(card.next_review_at).getTime() - Date.now()) / 86400000));
-  return (
-    <View style={styles.nextReviewBadge}>
-      <Text style={styles.nextReviewLabel}>{t('flashcards.nextReview')}</Text>
-      <Calendar size={20} color={colors.primary} />
-      <Text style={styles.nextReviewDate}>{date.toUpperCase()}</Text>
-      <Text style={styles.nextReviewIn}>
-        {t(plural(days, 'flashcards.nextReviewInOne', 'flashcards.nextReviewInOther'), { days })}
-      </Text>
-    </View>
-  );
-}
-
-/**
- * Hint bottom sheet — the spec's "grammar analysis" panel. It only exists
- * here (never on the card itself): it splits the sentence into its parts
- * (subject / verb / complement) so the learner can rebuild it consciously.
- */
-function HintSheet({ visible, card, onClose }: { visible: boolean; card: Flashcard; onClose: () => void }) {
-  const t = useT();
-  const parts = [
-    { tag: 'S', label: t('flashcards.partSubject'), value: card.subject },
-    { tag: 'V', label: t('flashcards.partVerb'), value: card.verb },
-    { tag: 'C', label: t('flashcards.partComplement'), value: card.complement },
-  ].filter((p) => p.value);
-
-  return (
-    <Modal transparent visible={visible} animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.sheetBackdrop} onPress={onClose} accessibilityLabel={t('common.close')} />
-      <View style={styles.hintSheet}>
-        <View style={styles.hintSheetHandle} />
-        <Text style={styles.hintSheetTitle}>{t('flashcards.hintTitle')}</Text>
-        <Text style={styles.hintSheetSentence}>{card.en}</Text>
-        {parts.length > 0 ? (
-          <View style={styles.hintParts}>
-            {parts.map((p) => (
-              <View key={p.tag} style={styles.hintPartRow}>
-                <View style={styles.hintPartTag}>
-                  <Text style={styles.hintPartTagText}>{p.tag}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.hintPartLabel}>{p.label}</Text>
-                  <Text style={styles.hintPartValue}>{p.value}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <Text style={styles.hintEmpty}>{t('flashcards.hintEmpty')}</Text>
-        )}
-        {card.explanation ? (
-          <View style={styles.hintExplanationBox}>
-            <Text style={styles.hintExplanationLabel}>{t('flashcards.hintWhy')}</Text>
-            <Text style={styles.hintExplanationText}>{card.explanation}</Text>
-          </View>
-        ) : null}
-        <Pressable style={styles.hintDoneBtn} onPress={onClose}>
-          <Text style={styles.hintDoneText}>{t('flashcards.hintDone')}</Text>
-        </Pressable>
-      </View>
-    </Modal>
-  );
-}
-
-/**
- * Speaking practice — a live tutor session focused on repeating this exact
- * sentence. Reuses the same realtime voice pipeline as Chat, with an
- * instruction suffix that pins the target sentence so the tutor drills it.
- * Corrections made here are recorded and become cards (same as Chat).
- */
-function PracticeModal({ card, onClose }: { card: Flashcard; onClose: () => void }) {
-  const t = useT();
-  const createConversation = useCreateConversation();
-  const addCorrection = useAddCorrection();
-  const createFlashcard = useCreateFlashcard();
-  const conversationIdRef = useRef<string | null>(null);
-  const planetIdRef = useRef<string | null>(card.planet_id);
-  planetIdRef.current = card.planet_id;
-
-  /** Creates (once) the conversation this practice session persists to. */
-  const ensureConversation = async (): Promise<string | null> => {
-    if (conversationIdRef.current) return conversationIdRef.current;
-    try {
-      const conv = await createConversation.mutateAsync({
-        title: t('flashcards.practiceTitle'),
-        planetId: planetIdRef.current ?? undefined,
-      });
-      conversationIdRef.current = conv.id;
-      return conv.id;
-    } catch {
-      return null; // offline: voice still works, nothing persisted
-    }
-  };
-
-  const asString = (v: unknown) => (typeof v === 'string' ? v : '');
-  const asOptional = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : undefined);
-
-  const onToolCall: ToolCallHandler = async (name, args) => {
-    switch (name) {
-      case 'record_correction': {
-        const convId = await ensureConversation();
-        if (!convId) return { error: 'no active conversation' };
-        const corr = await addCorrection.mutateAsync({
-          conversationId: convId,
-          said: asString(args.said),
-          corrected: asString(args.corrected),
-          explanation: asString(args.explanation_pt),
-          pt: asOptional(args.explanation_pt),
-          mistakePart: asOptional(args.mistake_part),
-          subject: asOptional(args.subject),
-          verb: asOptional(args.verb),
-          complement: asOptional(args.complement),
-        });
-        return { ok: true, correction_id: corr.id };
-      }
-      case 'create_flashcard': {
-        const fc = await createFlashcard.mutateAsync({
-          en: asString(args.en),
-          pt: asString(args.pt),
-          explanation: asOptional(args.explanation_pt),
-          subject: asOptional(args.subject),
-          verb: asOptional(args.verb),
-          complement: asOptional(args.complement),
-          planetId: planetIdRef.current ?? undefined,
-        });
-        return { ok: true, flashcard_id: fc.id };
-      }
-      default:
-        return { error: `unknown tool ${name}` };
-    }
-  };
-
-  const voice = useVoiceConversation(onToolCall, {
-    instructionsSuffix: t('flashcards.practicePrompt', { sentence: card.en }),
-  });
-
-  // The sheet mounts only while open, so starting here is enough — unmount
-  // (any close path) runs the hook's cleanup and stops the session.
-  useEffect(() => {
-    voice.start();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const statusText =
-    voice.status === 'connecting'
-      ? t('chat.hint.connecting')
-      : voice.status === 'speaking'
-        ? t('chat.hint.tutorSpeaking')
-        : voice.status === 'error'
-          ? (voice.error ?? t('common.somethingWrong'))
-          : t('flashcards.practiceListening');
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.practiceBackdrop} onPress={onClose} accessibilityLabel={t('common.close')} />
-      <View style={styles.practiceSheet}>
-        <View style={styles.practiceHeader}>
-          <View style={styles.practiceHeaderIcon}>
-            <Mic size={18} color={colors.textOnPrimary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.practiceTitle}>{t('flashcards.practiceTitle')}</Text>
-            <Text style={styles.practiceSubtitle}>{t('flashcards.practiceSubtitle')}</Text>
-          </View>
-          <Pressable onPress={onClose} hitSlop={8} accessibilityLabel={t('common.close')}>
-            <View style={styles.practiceClose}>
-              <Text style={styles.practiceCloseText}>✕</Text>
-            </View>
-          </Pressable>
-        </View>
-
-        <View style={styles.practiceSentenceBox}>
-          <Text style={styles.practiceSentence}>{card.en}</Text>
-        </View>
-
-        <View style={[styles.practiceStatusRow, voice.status === 'speaking' && styles.practiceStatusSpeaking]}>
-          <View style={[styles.practiceStatusDot, voice.status === 'speaking' && styles.practiceStatusDotActive]} />
-          <Text style={styles.practiceStatusText}>{statusText}</Text>
-        </View>
-
-        <View style={styles.practiceTranscript}>
-          {voice.messages.length === 0 ? (
-            <Text style={styles.practiceEmpty}>{t('flashcards.practiceEmpty')}</Text>
-          ) : (
-            voice.messages.map((m) => (
-              <View key={m.id} style={[styles.practiceBubbleRow, m.role === 'user' ? styles.practiceBubbleUser : styles.practiceBubbleTutor]}>
-                <Text style={m.role === 'user' ? styles.practiceBubbleUserText : styles.practiceBubbleTutorText}>
-                  {m.text}
-                </Text>
-              </View>
-            ))
-          )}
-        </View>
-
-        <Pressable
-          style={[styles.practiceStopBtn, (voice.status === 'idle' || voice.status === 'error') && styles.practiceStopBtnIdle]}
-          onPress={onClose}
-        >
-          <Text style={styles.practiceStopText}>
-            {voice.status === 'idle' || voice.status === 'error' ? t('flashcards.practiceDone') : t('flashcards.practiceStop')}
-          </Text>
-        </Pressable>
-      </View>
-    </Modal>
-  );
-}
-
 export function FlashcardsScreen() {
   const t = useT();
   const { activeDeckId, openDeck, closeDeck } = useUiStore();
   const [index, setIndex] = useState(0);
   const [flipped, setFlipped] = useState(false);
   const flip = useRef(new Animated.Value(0)).current;
-  const [listening, setListening] = useState(false);
-  const [hintOpen, setHintOpen] = useState(false);
-  const [practiceOpen, setPracticeOpen] = useState(false);
   const [showLearned, setShowLearned] = useState(false);
   const [favorited, setFavorited] = useState<Set<string>>(new Set());
 
@@ -422,17 +120,13 @@ export function FlashcardsScreen() {
 
   const next = () => {
     setFlipped(false);
-    setIndex((i) => (i + 1) % Math.max(deckCards.length, 1));
-  };
-
-  const user = useAuthStore((s) => s.user);
-
-  const listen = async () => {
-    if (!card) return;
-    setListening(true);
-    // Cards hold target-language text, so the learner's tutor voice applies.
-    await speechPlayer.speak(card.en, effectiveVoice(user?.voice ?? '', user?.language ?? 'en'));
-    setListening(false);
+    // A card rated in the due deck stops being due, so the refetch drops it
+    // and the current index already lands on the card that followed it —
+    // advancing as well skipped that card entirely. The Learned deck keeps
+    // its cards, so there it still has to move on.
+    if (showLearnedActive) {
+      setIndex((i) => (i + 1) % Math.max(deckCards.length, 1));
+    }
   };
 
   if (activeDeckId === null) {
@@ -681,46 +375,11 @@ export function FlashcardsScreen() {
               </View>
               {/* The front shows ONLY the English sentence — the translation
                   stays hidden until "Reveal Translation" (spec: try to recall
-                  first), and grammar analysis lives only inside the Hint
-                  sheet. numberOfLines keeps the fixed-height card from
-                  overflowing when the phrase wraps. */}
+                  first). numberOfLines caps a long phrase at the card's
+                  minimum height on short screens. */}
               <Text style={styles.cardEnglish} numberOfLines={2}>
                 {card.en}
               </Text>
-              <View style={styles.frontActions}>
-                <Pressable
-                  style={[styles.actionBtn, listening && styles.actionBtnActive]}
-                  onPress={(e) => {
-                    // These buttons live inside the card's flip Pressable;
-                    // keep the tap from also flipping the card.
-                    e.stopPropagation();
-                    listen();
-                  }}
-                  accessibilityLabel={t('flashcards.listen')}
-                >
-                  <Volume2 size={20} color={listening ? colors.textOnPrimary : colors.primary} />
-                </Pressable>
-                <Pressable
-                  style={styles.actionBtn}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    setPracticeOpen(true);
-                  }}
-                  accessibilityLabel={t('flashcards.speak')}
-                >
-                  <Mic size={20} color={colors.primary} />
-                </Pressable>
-                <Pressable
-                  style={styles.actionBtn}
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    setHintOpen(true);
-                  }}
-                  accessibilityLabel={t('flashcards.hint')}
-                >
-                  <Lightbulb size={20} color={colors.primary} />
-                </Pressable>
-              </View>
               <Pressable
                 style={styles.revealBtn}
                 onPress={(e) => {
@@ -734,10 +393,7 @@ export function FlashcardsScreen() {
             </Animated.View>
 
             <Animated.View style={[styles.card, styles.cardBack, { transform: [{ perspective: 1000 }, { rotateY: backRotate }] }]}>
-              <Text style={styles.cardLabel}>{t('flashcards.back')}</Text>
-              <Text style={styles.cardEnglish}>{card.en}</Text>
               <Text style={styles.cardPt}>{card.pt}</Text>
-              <Text style={styles.cardExplanation}>{card.explanation}</Text>
               <Pressable
                 style={styles.backActionBtn}
                 onPress={() => setFlipped(false)}
@@ -749,16 +405,12 @@ export function FlashcardsScreen() {
           </Pressable>
         </View>
 
-        <RetentionGraph card={card} />
-        <RatingButtons card={card} onRated={next} />
+        <View style={styles.ratingSlot}>
+          {flipped && <RatingButtons card={card} onRated={next} />}
+        </View>
       </ScrollView>
 
       <AppTabBar />
-      <HintSheet visible={hintOpen} card={card} onClose={() => setHintOpen(false)} />
-      {/* Mounted only while open: unmounting runs the voice hook's cleanup,
-          which tears down the realtime session — so every close path (stop
-          button, backdrop, ✕) leaves the mic and socket stopped. */}
-      {practiceOpen && <PracticeModal card={card} onClose={() => setPracticeOpen(false)} />}
     </View>
   );
 }
@@ -776,6 +428,9 @@ const styles = StyleSheet.create({
     marginTop: -20,
   },
   sheetContent: {
+    // flexGrow lets the card claim the leftover height instead of leaving a
+    // blank block above the tab bar.
+    flexGrow: 1,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.xl,
@@ -956,7 +611,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   cardArea: {
-    height: 258,
+    // Fills whatever the toggle row and the rating slot leave over, so the
+    // screen has no dead space; minHeight keeps it readable on short phones,
+    // where the sheet scrolls instead.
+    flex: 1,
+    minHeight: 240,
     marginBottom: spacing.lg,
   },
   cardPressable: {
@@ -1003,39 +662,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.rating.hard,
   },
-  cardLabel: {
-    position: 'absolute',
-    top: spacing.md,
-    left: spacing.md,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1,
-    color: colors.textFaint,
-  },
   cardEnglish: {
     ...typography.display,
     fontSize: 26,
     color: colors.text,
     textAlign: 'center',
   },
-  // Front-of-card actions: hear, speak, hint — the spec's four buttons with
-  // "Reveal Translation" as the primary action below.
-  frontActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  actionBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionBtnActive: {
-    backgroundColor: colors.primary,
-  },
+  // "Reveal Translation" — the card front's only action.
   revealBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1066,268 +699,12 @@ const styles = StyleSheet.create({
     color: colors.textOnPrimary,
   },
   cardPt: {
-    marginTop: spacing.sm,
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.textOnPrimary,
-    textAlign: 'center',
-  },
-  cardExplanation: {
-    marginTop: spacing.sm,
-    fontSize: 14,
-    lineHeight: 20,
+    ...typography.display,
+    fontSize: 24,
     color: colors.textOnPrimary,
     textAlign: 'center',
   },
   // ---- Hint bottom sheet ----
-  sheetBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(10,12,28,0.45)',
-  },
-  hintSheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xl,
-  },
-  hintSheetHandle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.border,
-    marginBottom: spacing.md,
-  },
-  hintSheetTitle: {
-    ...typography.section,
-    color: colors.text,
-    textAlign: 'center',
-  },
-  hintSheetSentence: {
-    ...typography.body,
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.primary,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-  },
-  hintParts: {
-    marginTop: spacing.md,
-    gap: spacing.sm,
-  },
-  hintPartRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: spacing.sm,
-  },
-  hintPartTag: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: spacing.sm,
-  },
-  hintPartTagText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: colors.textOnPrimary,
-  },
-  hintPartLabel: {
-    ...typography.eyebrow,
-    fontSize: 9,
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-  },
-  hintPartValue: {
-    ...typography.body,
-    color: colors.text,
-    marginTop: 1,
-  },
-  hintEmpty: {
-    ...typography.caption,
-    color: colors.textFaint,
-    textAlign: 'center',
-    marginTop: spacing.md,
-  },
-  hintExplanationBox: {
-    marginTop: spacing.md,
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.md,
-    padding: spacing.sm + 4,
-  },
-  hintExplanationLabel: {
-    ...typography.eyebrow,
-    fontSize: 9,
-    color: colors.primary,
-    textTransform: 'uppercase',
-  },
-  hintExplanationText: {
-    ...typography.body,
-    fontSize: 14,
-    lineHeight: 20,
-    color: colors.text,
-    marginTop: 2,
-  },
-  hintDoneBtn: {
-    marginTop: spacing.lg,
-    backgroundColor: colors.primary,
-    borderRadius: radius.round,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  hintDoneText: {
-    ...typography.label,
-    fontWeight: '800',
-    color: colors.textOnPrimary,
-  },
-  // ---- Speaking practice sheet ----
-  practiceBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(10,12,28,0.45)',
-  },
-  practiceSheet: {
-    backgroundColor: colors.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xl,
-  },
-  practiceHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  practiceHeaderIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  practiceTitle: {
-    ...typography.section,
-    fontSize: 16,
-    color: colors.text,
-  },
-  practiceSubtitle: {
-    ...typography.caption,
-    color: colors.textMuted,
-  },
-  practiceClose: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  practiceCloseText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.textMuted,
-  },
-  practiceSentenceBox: {
-    marginTop: spacing.md,
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    alignItems: 'center',
-  },
-  practiceSentence: {
-    ...typography.display,
-    fontSize: 20,
-    lineHeight: 27,
-    color: colors.text,
-    textAlign: 'center',
-  },
-  practiceStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'center',
-    gap: 6,
-    marginTop: spacing.sm,
-    backgroundColor: colors.surface,
-    borderRadius: radius.round,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-  },
-  practiceStatusSpeaking: {
-    backgroundColor: colors.primarySoft,
-  },
-  practiceStatusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.success,
-  },
-  practiceStatusDotActive: {
-    backgroundColor: colors.primary,
-  },
-  practiceStatusText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: colors.textMuted,
-  },
-  practiceTranscript: {
-    marginTop: spacing.md,
-    maxHeight: 150,
-    gap: 6,
-  },
-  practiceEmpty: {
-    ...typography.caption,
-    color: colors.textFaint,
-    textAlign: 'center',
-    paddingVertical: spacing.md,
-  },
-  practiceBubbleRow: {
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.sm + 2,
-    paddingVertical: 8,
-    maxWidth: '92%',
-  },
-  practiceBubbleUser: {
-    alignSelf: 'flex-end',
-    backgroundColor: colors.primarySoft,
-    borderBottomRightRadius: 4,
-  },
-  practiceBubbleTutor: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.surface,
-    borderBottomLeftRadius: 4,
-  },
-  practiceBubbleUserText: {
-    fontSize: 14,
-    lineHeight: 19,
-    color: colors.text,
-  },
-  practiceBubbleTutorText: {
-    fontSize: 14,
-    lineHeight: 19,
-    color: colors.text,
-  },
-  practiceStopBtn: {
-    marginTop: spacing.lg,
-    backgroundColor: colors.primary,
-    borderRadius: radius.round,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  practiceStopBtnIdle: {
-    backgroundColor: colors.primaryPressed,
-  },
-  practiceStopText: {
-    ...typography.label,
-    fontWeight: '800',
-    color: colors.textOnPrimary,
-  },
   reviewToggleRow: {
     flexDirection: 'row',
     marginBottom: spacing.md,
@@ -1374,57 +751,6 @@ const styles = StyleSheet.create({
   countBadgeTextActive: {
     color: colors.textOnPrimary,
   },
-  retentionSection: {
-    marginBottom: spacing.lg,
-  },
-  retentionLabel: {
-    ...typography.label,
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  retentionRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-  yAxis: {
-    height: 70,
-    justifyContent: 'space-between',
-  },
-  xAxis: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 4,
-  },
-  axisText: {
-    fontSize: 9,
-    color: colors.textFaint,
-  },
-  nextReviewBadge: {
-    flex: 1,
-    alignItems: 'center',
-    backgroundColor: colors.primarySoft,
-    borderRadius: radius.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xs,
-  },
-  nextReviewLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.textMuted,
-    textAlign: 'center',
-  },
-  nextReviewDate: {
-    ...typography.label,
-    marginTop: spacing.xs,
-    fontWeight: '800',
-    color: colors.primary,
-  },
-  nextReviewIn: {
-    marginTop: 1,
-    fontSize: 10,
-    color: colors.textMuted,
-  },
   pendingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1440,6 +766,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#8A6D00',
+  },
+  ratingSlot: {
+    minHeight: 45,
   },
   ratingRow: {
     flexDirection: 'row',

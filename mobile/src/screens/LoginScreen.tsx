@@ -1,12 +1,14 @@
 import { useMutation } from '@tanstack/react-query';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import { ApiError } from '../api/client';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { Lock, Mail } from 'lucide-react-native';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AuthLayout } from '../components/AuthLayout';
 import { AuthTextField } from '../components/AuthTextField';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { GoogleMark } from '../components/SocialAuthRow';
+import { AppleMark, GoogleMark } from '../components/SocialAuthRow';
 import type { AuthStackParamList } from '../navigation/RootNavigator';
 import { useT } from '../i18n';
 import { useAuthStore } from '../store/auth';
@@ -44,14 +46,40 @@ function OutlineButton({
   );
 }
 
+/** The user backing out of the native Apple sheet. The SDK reports it as an
+ * error with this code; it is a choice, not a failure to report. */
+function isAppleCancellation(err: unknown): boolean {
+  return (err as { code?: string })?.code === 'ERR_REQUEST_CANCELED';
+}
+
 export function LoginScreen({ navigation }: Props) {
   const t = useT();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
-  const [googleError, setGoogleError] = useState<string | null>(null);
+  // One error line under the provider buttons — whichever provider failed.
+  const [socialError, setSocialError] = useState<string | null>(null);
   const signIn = useAuthStore((s) => s.signIn);
   const signInWithGoogle = useAuthStore((s) => s.signInWithGoogle);
+  const signInWithApple = useAuthStore((s) => s.signInWithApple);
+
+  // Sign in with Apple exists only on iOS 13+, so the button is rendered only
+  // where the device can actually complete it.
+  const [appleAvailable, setAppleAvailable] = useState(false);
+  useEffect(() => {
+    if (Platform.OS !== 'ios') return;
+    let cancelled = false;
+    AppleAuthentication.isAvailableAsync()
+      .then((available) => {
+        if (!cancelled) setAppleAvailable(available);
+      })
+      .catch(() => {
+        // Treat an unavailable check as unavailable; never block the screen.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Staggered entrance for the form fields
   const fieldIn = useRef(new Animated.Value(0)).current;
@@ -78,16 +106,34 @@ export function LoginScreen({ navigation }: Props) {
   const mutation = useMutation({
     mutationFn: () => signIn(email.trim(), password),
     onError: (err) => {
-      const message = err instanceof Error ? err.message : t('common.somethingWrong');
+      // The backend answers in English; the learner may not read it. Statuses
+      // whose meaning is unambiguous get localized copy, and anything else
+      // falls back to the generic line rather than leaking a raw server
+      // string into a Spanish or Portuguese UI.
+      const message =
+        err instanceof ApiError && err.status === 401
+          ? t('auth.invalidCredentials')
+          : t('common.somethingWrong');
       setFieldErrors((prev) => ({ ...prev, password: message }));
     },
   });
 
   const googleMutation = useMutation({
     mutationFn: signInWithGoogle,
-    onMutate: () => setGoogleError(null),
+    onMutate: () => setSocialError(null),
     onError: (err) => {
-      setGoogleError(err instanceof Error ? err.message : t('common.somethingWrong'));
+      setSocialError(err instanceof Error ? err.message : t('common.somethingWrong'));
+    },
+  });
+
+  const appleMutation = useMutation({
+    mutationFn: signInWithApple,
+    onMutate: () => setSocialError(null),
+    onError: (err) => {
+      // Dismissing the native sheet is a cancellation, not a failure — saying
+      // "something went wrong" for a deliberate back-tap is just noise.
+      if (isAppleCancellation(err)) return;
+      setSocialError(err instanceof Error ? err.message : t('common.somethingWrong'));
     },
   });
 
@@ -145,10 +191,6 @@ export function LoginScreen({ navigation }: Props) {
         />
       </Animated.View>
 
-      <Pressable style={styles.forgotRow} hitSlop={8}>
-        <Text style={styles.forgotText}>{t('auth.forgotPassword')}</Text>
-      </Pressable>
-
       <View style={styles.dividerRow}>
         <View style={styles.divider} />
         <Text style={styles.dividerText}>{t('auth.login.or')}</Text>
@@ -163,7 +205,18 @@ export function LoginScreen({ navigation }: Props) {
         // with an IN_PROGRESS error, which would read as a failed login.
         disabled={googleMutation.isPending}
       />
-      {googleError ? <Text style={styles.googleError}>{googleError}</Text> : null}
+      {appleAvailable ? (
+        <>
+          <View style={styles.outlineGap} />
+          <OutlineButton
+            label={t('auth.login.continueWithProvider', { provider: 'Apple' })}
+            onPress={() => appleMutation.mutate()}
+            icon={<AppleMark size={20} />}
+            disabled={appleMutation.isPending}
+          />
+        </>
+      ) : null}
+      {socialError ? <Text style={styles.googleError}>{socialError}</Text> : null}
       <View style={styles.outlineGap} />
       <OutlineButton
         label={t('auth.login.createAccount')}
@@ -177,15 +230,6 @@ export function LoginScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   submit: {
     marginTop: spacing.sm,
-  },
-  forgotRow: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  forgotText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.primary,
   },
   dividerRow: {
     flexDirection: 'row',

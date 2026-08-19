@@ -27,7 +27,7 @@ export function GoogleMark({ size }: { size: number }) {
   );
 }
 
-function AppleMark({ size }: { size: number }) {
+export function AppleMark({ size }: { size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 384 512">
       <Path

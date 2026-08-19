@@ -109,10 +109,7 @@ pub fn planet_completed(
 
 /// How many of the planet's modules are finished — the "7 of 10 blocks"
 /// number the app shows.
-pub fn completed_count(
-    lessons: &[PlanetLesson],
-    progress: &HashMap<Uuid, ModuleProgress>,
-) -> i64 {
+pub fn completed_count(lessons: &[PlanetLesson], progress: &HashMap<Uuid, ModuleProgress>) -> i64 {
     module_states(lessons, progress)
         .iter()
         .filter(|s| s.is_completed())
@@ -189,7 +186,11 @@ pub fn focus_slots(planet_number: i32) -> [&'static str; 3] {
             "name, introductions and age",
             "origin and residence",
         ],
-        2 => ["to be (am/is/are)", "subjects and connectors", "to be in context"],
+        2 => [
+            "to be (am/is/are)",
+            "subjects and connectors",
+            "to be in context",
+        ],
         n => {
             let trios = VERB_TRIOS;
             // Planets past the curated list cycle back through it, so a course
@@ -266,17 +267,41 @@ const VERB_TRIOS: &[[&str; 3]] = &[
 /// instead of memorized.
 pub fn module_role(position: i32, slots: &[&str; 3]) -> (String, String) {
     let (focus, description) = match position {
-        1 => (format!("focus:{}", slots[0]), format!("Build sentences with {}.", slots[0])),
-        2 => (format!("focus:{}", slots[1]), format!("Build sentences with {}.", slots[1])),
-        3 => (format!("focus:{}", slots[2]), format!("Build sentences with {}.", slots[2])),
+        1 => (
+            format!("focus:{}", slots[0]),
+            format!("Build sentences with {}.", slots[0]),
+        ),
+        2 => (
+            format!("focus:{}", slots[1]),
+            format!("Build sentences with {}.", slots[1]),
+        ),
+        3 => (
+            format!("focus:{}", slots[2]),
+            format!("Build sentences with {}.", slots[2]),
+        ),
         4 => (
             "mix".to_string(),
-            format!("Combine {}, {} and {} in one idea, joined with connectors.", slots[0], slots[1], slots[2]),
+            format!(
+                "Combine {}, {} and {} in one idea, joined with connectors.",
+                slots[0], slots[1], slots[2]
+            ),
         ),
-        5 => ("past".to_string(), "The same structures in the past.".to_string()),
-        6 => ("future".to_string(), "The same structures in the future.".to_string()),
-        7 => ("questions".to_string(), "Turn the structures into questions.".to_string()),
-        8 => ("negation".to_string(), "Turn the structures into negatives.".to_string()),
+        5 => (
+            "past".to_string(),
+            "The same structures in the past.".to_string(),
+        ),
+        6 => (
+            "future".to_string(),
+            "The same structures in the future.".to_string(),
+        ),
+        7 => (
+            "questions".to_string(),
+            "Turn the structures into questions.".to_string(),
+        ),
+        8 => (
+            "negation".to_string(),
+            "Turn the structures into negatives.".to_string(),
+        ),
         9 => (
             "dialogue".to_string(),
             "Questions and answers — freer conversation using everything so far.".to_string(),
@@ -325,7 +350,10 @@ mod tests {
         let states = module_states(&lessons, &HashMap::new());
         assert_eq!(states[0], ModuleState::Current);
         assert!(states[1..].iter().all(|s| *s == ModuleState::Locked));
-        assert_eq!(current_module(&lessons, &HashMap::new()).unwrap().position, 1);
+        assert_eq!(
+            current_module(&lessons, &HashMap::new()).unwrap().position,
+            1
+        );
     }
 
     /// The heart of the spec: the conversation alone does not open the next
@@ -340,7 +368,10 @@ mod tests {
         assert_eq!(states[0], ModuleState::FlashcardsPending);
         assert_eq!(states[1], ModuleState::Locked, "module 2 stays shut");
         // The learner is still on module 1 — the tutor must not move on.
-        assert_eq!(current_module(&lessons, &progress).unwrap().id, lessons[0].id);
+        assert_eq!(
+            current_module(&lessons, &progress).unwrap().id,
+            lessons[0].id
+        );
     }
 
     fn progress_done(l: &PlanetLesson, conversation: bool, flashcards: bool) -> ModuleProgress {
@@ -357,7 +388,10 @@ mod tests {
         assert_eq!(states[0], ModuleState::Completed);
         assert_eq!(states[1], ModuleState::Current);
         assert_eq!(states[2], ModuleState::Locked);
-        assert_eq!(current_module(&lessons, &progress).unwrap().id, lessons[1].id);
+        assert_eq!(
+            current_module(&lessons, &progress).unwrap().id,
+            lessons[1].id
+        );
         assert_eq!(completed_count(&lessons, &progress), 1);
     }
 

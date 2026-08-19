@@ -18,10 +18,23 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub fn router(state: AppState) -> Router<AppState> {
-    Router::new()
+    // Only the credential-guessing surface belongs in the tight brute-force
+    // bucket. `/refresh`, `/me` and the profile mutations are ordinary
+    // authenticated traffic — one learner opening the app spends several of
+    // them, and sharing the login budget meant a handful of concurrent users
+    // could lock everyone else out (and, via a 429 on `/refresh`, log them
+    // out). They get the generous write budget instead.
+    let credentials = Router::new()
         .route("/register", post(register))
         .route("/login", post(login))
         .route("/google", post(google))
+        .route("/apple", post(apple))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            crate::middleware::ratelimit::auth_ratelimit,
+        ));
+
+    let session = Router::new()
         .route("/refresh", post(refresh))
         .route("/logout", post(logout))
         .route("/me", get(me))
@@ -29,11 +42,13 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/language", post(set_language))
         .route("/voice", post(set_voice))
         .route("/name", post(set_name))
-        // Per-IP brute-force protection on the auth endpoints.
+        .route("/timezone", post(set_timezone))
         .route_layer(middleware::from_fn_with_state(
             state,
-            crate::middleware::ratelimit::auth_ratelimit,
-        ))
+            crate::middleware::ratelimit::write_ratelimit,
+        ));
+
+    credentials.merge(session)
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,6 +91,9 @@ pub struct UserResponse {
     pub language: String,
     /// Chosen tutor voice (OpenAI voice id); empty = per-language default.
     pub voice: String,
+    /// Minutes east of UTC, as the app last reported. The client compares it
+    /// to the device's current offset and re-reports only when it changed.
+    pub utc_offset_minutes: i32,
 }
 
 impl From<User> for UserResponse {
@@ -85,6 +103,7 @@ impl From<User> for UserResponse {
             email: u.email,
             created_at: u.created_at,
             name: u.name,
+            utc_offset_minutes: u.utc_offset_minutes,
             base_language: u.base_language,
             language: u.language,
             voice: u.voice,
@@ -197,7 +216,8 @@ async fn register(
     let email = body.email.trim().to_lowercase();
     validate_credentials(&email, &body.password)?;
 
-    let password_hash = password::hash_password(&body.password)
+    let password_hash = password::hash_password_async(&body.password)
+        .await
         .map_err(|e| AppError::internal(format!("failed to hash password: {e}")))?;
 
     let language = body.language.clone().unwrap_or_else(|| "en".into());
@@ -263,10 +283,10 @@ async fn login(
     // account exists, the dummy hash otherwise), so the response time does
     // not reveal whether an email is registered.
     let Some(user) = found else {
-        password::verify_password(&body.password, dummy_hash());
+        password::verify_password_async(&body.password, dummy_hash()).await;
         return Err(AppError::unauthorized("Invalid email or password"));
     };
-    if !password::verify_password(&body.password, &user.password_hash) {
+    if !password::verify_password_async(&body.password, &user.password_hash).await {
         return Err(AppError::unauthorized("Invalid email or password"));
     }
 
@@ -347,14 +367,113 @@ async fn google(
         // never match it, and the row stays shaped like every other user.
         // ponytail: no `google_sub` column and no provider table — add them
         // when a second provider or account unlinking exists.
-        password_hash: password::hash_password(
+        password_hash: password::hash_password_async(
             &repositories::refresh_tokens::generate_token(),
         )
+        .await
         .map_err(|e| AppError::internal(format!("failed to hash password: {e}")))?,
         base_language,
         language,
         voice: String::new(),
         name: identity.name,
+    };
+
+    let pair = mint_token_pair(&state, new_user.id, Uuid::new_v4())?;
+    let user = repositories::users::create_with_refresh_token(
+        &state.pool,
+        &new_user,
+        &pair.refresh_hash,
+        pair.family_id,
+        pair.expires_at,
+    )
+    .await?;
+
+    Ok(Json(AuthResponse {
+        token: pair.access,
+        refresh_token: pair.raw_refresh,
+        user: user.into(),
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AppleAuthRequest {
+    /// The identity token the native Apple sheet handed the app.
+    pub identity_token: String,
+    /// Apple sends the learner's name only in the *first* authorization
+    /// credential, never inside the token, so the app forwards it here. It
+    /// is absent on every later sign-in.
+    pub name: Option<String>,
+    /// Course choice, used only when this is a first sign-in (the app sends
+    /// what the pre-login language picker chose). Existing accounts keep the
+    /// course they already have.
+    pub language: Option<String>,
+    pub base_language: Option<String>,
+}
+
+/// Signs in with an Apple identity token, creating the account on first use.
+///
+/// Same shape as `/google`, and the same caveat: accounts are matched by
+/// email, which is safe *because* the token's `email_verified` claim is
+/// checked. Apple private-relay addresses are stable per app, so a learner
+/// who hides their address keeps the same account across sign-ins.
+async fn apple(
+    State(state): State<AppState>,
+    Json(body): Json<AppleAuthRequest>,
+) -> Result<Json<AuthResponse>> {
+    let identity = crate::services::apple::verify_identity_token(
+        &state.http_client,
+        body.identity_token.trim(),
+        &state.config.apple_client_ids,
+    )
+    .await?;
+
+    // Returning learner: mint a session against the existing account and
+    // leave their course, voice and name exactly as they set them.
+    if let Some(user) = repositories::users::find_by_email(&state.pool, &identity.email).await? {
+        let pair = mint_token_pair(&state, user.id, Uuid::new_v4())?;
+        repositories::refresh_tokens::issue(
+            &state.pool,
+            user.id,
+            pair.family_id,
+            &pair.refresh_hash,
+            pair.expires_at,
+        )
+        .await?;
+        return Ok(Json(AuthResponse {
+            token: pair.access,
+            refresh_token: pair.raw_refresh,
+            user: user.into(),
+        }));
+    }
+
+    let language = body.language.clone().unwrap_or_else(|| "en".into());
+    let (base_language, language) = resolve_course_pair(&body.base_language, &language)?;
+
+    // Names come from a third party, so they are truncated to the same 120
+    // characters the rest of the app enforces rather than rejected.
+    let name: String = body
+        .name
+        .unwrap_or_default()
+        .trim()
+        .chars()
+        .take(120)
+        .collect();
+
+    let new_user = NewUser {
+        id: Uuid::new_v4(),
+        email: identity.email,
+        // The column is NOT NULL and this account has no password, so it
+        // gets the hash of a value nobody holds: /login's Argon2 check can
+        // never match it, and the row stays shaped like every other user.
+        password_hash: password::hash_password_async(
+            &repositories::refresh_tokens::generate_token(),
+        )
+        .await
+        .map_err(|e| AppError::internal(format!("failed to hash password: {e}")))?,
+        base_language,
+        language,
+        voice: String::new(),
+        name,
     };
 
     let pair = mint_token_pair(&state, new_user.id, Uuid::new_v4())?;
@@ -562,6 +681,36 @@ pub struct SetVoice {
 #[derive(Debug, Deserialize)]
 pub struct SetName {
     pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetTimezone {
+    /// Minutes east of UTC — JavaScript's `-getTimezoneOffset()`.
+    pub utc_offset_minutes: i32,
+}
+
+/// Records the learner's UTC offset so their daily streak is counted on their
+/// own calendar. The app reports it at startup and whenever it changes (DST,
+/// travel), which is as fresh as this needs to be.
+async fn set_timezone(
+    State(state): State<AppState>,
+    AuthUser(user_id): AuthUser,
+    Json(body): Json<SetTimezone>,
+) -> Result<Json<UserResponse>> {
+    // Real zones span UTC-12..UTC+14; the column has the same CHECK, so
+    // rejecting here turns a constraint violation into a clear 400.
+    if !(-840..=840).contains(&body.utc_offset_minutes) {
+        return Err(AppError::bad_request(
+            "utc_offset_minutes must be between -840 and 840",
+        ));
+    }
+
+    let user =
+        repositories::users::update_utc_offset(&state.pool, user_id, body.utc_offset_minutes)
+            .await?
+            .ok_or_else(|| AppError::unauthorized("User no longer exists"))?;
+
+    Ok(Json(user.into()))
 }
 
 /// Updates the learner's display name. The next tutor session and every

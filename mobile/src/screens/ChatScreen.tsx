@@ -408,12 +408,23 @@ export function ChatScreen() {
     voice.messages.forEach((m) => {
       if (m.partial || persistedMessagesRef.current.has(m.id)) return;
       if (!m.text.trim()) return; // nothing to persist yet — skip, don't burn the id
+      // Marked before the call so the effect cannot fire twice for the same
+      // line, and released again if the write fails — otherwise a dropped
+      // request silently loses that turn from the saved transcript with no
+      // way to retry it.
       persistedMessagesRef.current.add(m.id);
-      addMessage.mutate({
-        conversationId: conversationIdRef.current!,
-        role: m.role === 'user' ? 'user' : 'assistant',
-        text: m.text,
-      });
+      addMessage.mutate(
+        {
+          conversationId: conversationIdRef.current!,
+          role: m.role === 'user' ? 'user' : 'assistant',
+          text: m.text,
+        },
+        {
+          onError: () => {
+            persistedMessagesRef.current.delete(m.id);
+          },
+        },
+      );
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voice.messages, addMessage]);
@@ -666,8 +677,11 @@ export function ChatScreen() {
             {/* Before the session opens this is the pitch; once it's live
                 the same line carries the connection state, so the promise of
                 speech is only made when the tutor can actually deliver it. */}
-            <Text style={styles.heroSubtitle}>
-              {globeActive ? liveHint : t('chat.empty.subtitle')}
+            {/* A failure has to be visible: the hook sets `error` on mic
+                denial, a dropped socket and a rejected session, and nothing
+                rendered it — so those all failed in total silence. */}
+            <Text style={[styles.heroSubtitle, voice.error ? styles.heroError : null]}>
+              {voice.error ?? (globeActive ? liveHint : t('chat.empty.subtitle'))}
             </Text>
             <Pressable onPress={onOrbPress} hitSlop={10} accessibilityRole="button">
               <Text style={styles.heroCta}>{globeActive ? t('chat.orb.stop') : t('chat.empty.start')}</Text>
@@ -1040,6 +1054,9 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     color: colors.textMuted,
     textAlign: 'center',
+  },
+  heroError: {
+    color: colors.error,
   },
   heroCta: {
     marginTop: spacing.xl,

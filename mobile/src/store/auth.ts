@@ -4,7 +4,9 @@ import { create } from 'zustand';
 import { getSecureStorage, SecureKeys, storage, StorageKeys } from '../storage';
 import type { User } from '../types';
 import * as authApi from '../api/auth';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { ApiError, setSessionExpiredHandler } from '../api/client';
+import { resetQueryCache, setUnauthorizedHandler } from '../api/queryClient';
 import { GOOGLE_IOS_CLIENT_ID, GOOGLE_WEB_CLIENT_ID } from '../config';
 import { localeForBaseLanguage, useI18nStore } from '../i18n';
 
@@ -19,6 +21,7 @@ type AuthState = {
    * Resolves `false` when the learner dismissed the sheet — a cancellation
    * is not an error and must not surface as one. */
   signInWithGoogle: () => Promise<boolean>;
+  signInWithApple: () => Promise<boolean>;
   signUp: (email: string, password: string, name?: string) => Promise<void>;
   /** Persists a course change (base, target) to the backend. */
   setLanguage: (language: string, baseLanguage?: string) => Promise<void>;
@@ -77,13 +80,41 @@ function persistUser(user: User): void {
  * under the password box instead of a login failure. A bad response is a
  * failed sign-in, and it should read like one.
  */
+/**
+ * Keeps the learner's stored UTC offset current.
+ *
+ * The daily streak is counted on this offset's calendar, so it has to follow
+ * the learner through DST and travel. Fire-and-forget and only when it
+ * actually changed: getting it wrong costs a streak, but so would blocking
+ * app start on it.
+ */
+function syncTimezone(user: User): void {
+  const offset = -new Date().getTimezoneOffset();
+  if (user.utc_offset_minutes === offset) return;
+  authApi
+    .setTimezone(offset)
+    .then((updated) => {
+      // Only overwrite the cached profile with a real one: persisting an
+      // unexpected response would wipe the name and course the app is
+      // already showing.
+      if (updated && typeof updated.id === 'string') persistUser(updated);
+    })
+    .catch(() => {
+      // Best effort — the next launch tries again.
+    });
+}
+
 function persistSession(res: authApi.AuthResponse): void {
   if (typeof res?.token !== 'string' || typeof res?.refresh_token !== 'string') {
     throw new Error('Login failed: the server did not return a valid session.');
   }
+  // Belt and braces with the reset in clearSession: whatever route got us
+  // here, a new session must not read the previous one's cached responses.
+  resetQueryCache();
   getSecureStorage().set(SecureKeys.authToken, res.token);
   getSecureStorage().set(SecureKeys.refreshToken, res.refresh_token);
   persistUser(res.user);
+  syncTimezone(res.user);
 }
 
 let googleConfigured = false;
@@ -135,6 +166,9 @@ function clearSession(revokeServerSide: boolean): void {
   getSecureStorage().remove(SecureKeys.refreshToken);
   getSecureStorage().remove(SecureKeys.authUser);
   useAuthStore.setState({ token: null, user: null });
+  // Every cache key is per-query, not per-user, so anything left behind is
+  // served to whoever signs in next on this device.
+  resetQueryCache();
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -161,6 +195,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const user = await authApi.me();
       persistUser(user);
       set({ user, initialized: true });
+      void syncTimezone(user);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         // Access AND refresh tokens are gone — the session cannot be
@@ -203,6 +238,44 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const baseLanguage = storage.getString(StorageKeys.baseLanguage) ?? undefined;
     const language = storage.getString(StorageKeys.targetLanguage) ?? undefined;
     const res = await authApi.googleLogin(idToken, baseLanguage, language);
+    persistSession(res);
+    set({ token: res.token, user: res.user });
+    return true;
+  },
+
+  /** Sign in with Apple. Required by App Store guideline 4.8 wherever a
+   * third-party social login is offered, and iOS-only by nature. */
+  signInWithApple: async () => {
+    const credential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+    });
+    const identityToken = credential.identityToken;
+    if (!identityToken) {
+      // Apple withheld the token — nothing to verify server-side.
+      throw new Error('Apple did not return an identity token.');
+    }
+
+    // Apple sends the name exactly once, on the very first authorization for
+    // this app; every later sign-in returns null for it. Nothing to fall back
+    // on, so an empty name is fine — the app derives one from the email.
+    const fullName = [credential.fullName?.givenName, credential.fullName?.familyName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    // The course picked before login travels with a first-time account; the
+    // backend ignores it for an account that already exists.
+    const baseLanguage = storage.getString(StorageKeys.baseLanguage) ?? undefined;
+    const language = storage.getString(StorageKeys.targetLanguage) ?? undefined;
+    const res = await authApi.appleLogin(
+      identityToken,
+      fullName || undefined,
+      baseLanguage,
+      language,
+    );
     persistSession(res);
     set({ token: res.token, user: res.user });
     return true;
@@ -262,6 +335,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 // The client's 401 interceptor ends the session when the refresh token is
 // rejected. Registering here keeps the circular import out of client.ts
 // while guaranteeing one behavior everywhere: dead session = signOut.
+setUnauthorizedHandler(() => useAuthStore.getState().signOut());
+
 setSessionExpiredHandler(() => {
   clearSession(false);
 });

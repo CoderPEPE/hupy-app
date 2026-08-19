@@ -176,8 +176,7 @@ async fn record_production(
     // The per-structure state that powers the app's progress bar, rebuilt
     // from the same rows the next session's prompt will read — one source of
     // truth for what the learner has done.
-    let counts =
-        repositories::modules::structure_progress(&state.pool, user_id, lesson_id).await?;
+    let counts = repositories::modules::structure_progress(&state.pool, user_id, lesson_id).await?;
     let structures_json: Vec<Value> = structures
         .into_iter()
         .map(|s| {

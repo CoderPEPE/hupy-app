@@ -20,6 +20,28 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// `hash_password` off the async runtime.
+///
+/// Argon2 is deliberately slow and memory-hard — roughly 19 MB and tens of
+/// milliseconds per call. Running that inline on a tokio worker parks the
+/// whole thread, so a burst of registrations or logins stalls every other
+/// request the runtime is serving, database work included.
+pub async fn hash_password_async(password: &str) -> Result<String, argon2::password_hash::Error> {
+    let password = password.to_string();
+    tokio::task::spawn_blocking(move || hash_password(&password))
+        .await
+        .unwrap_or(Err(argon2::password_hash::Error::Crypto))
+}
+
+/// `verify_password` off the async runtime. Same reasoning as
+/// `hash_password_async`, and this one is on the login hot path.
+pub async fn verify_password_async(password: &str, hash: &str) -> bool {
+    let (password, hash) = (password.to_string(), hash.to_string());
+    tokio::task::spawn_blocking(move || verify_password(&password, &hash))
+        .await
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

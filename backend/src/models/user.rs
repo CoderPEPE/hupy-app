@@ -26,6 +26,11 @@ pub struct User {
     /// The learner's real name (set at registration); empty means callers
     /// fall back to the email-derived name.
     pub name: String,
+    /// Minutes east of UTC for the learner's own clock, as the app last
+    /// reported it. Streaks are counted on this calendar, not UTC's — an
+    /// evening session in Brazil (-180) is otherwise stamped with tomorrow's
+    /// UTC date and breaks the streak it just earned.
+    pub utc_offset_minutes: i32,
 }
 
 #[derive(Debug, Clone, Insertable)]

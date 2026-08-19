@@ -1,6 +1,6 @@
 import { AudioContext } from 'react-native-audio-api';
 import { shouldChimeXpGain } from '../gamification/xpFloat';
-import { configureIosSession, realtimeAudioPlayer } from './audioEngine';
+import { configureIosSession, configurePlaybackSession, realtimeAudioPlayer } from './audioEngine';
 import { speechPlayer } from './ttsPlayer';
 
 /**
@@ -49,9 +49,10 @@ class XpChimePlayer {
 
   private async getContext(): Promise<AudioContext> {
     if (!this.context) {
-      // Same session options as every other player — keeps the mic usable
-      // if a chime happens mid-conversation.
-      configureIosSession();
+      // Full-quality playback unless a live conversation owns the session,
+      // in which case its mic-preserving options have to stay.
+      if (realtimeAudioPlayer.isSessionActive) configureIosSession();
+      else configurePlaybackSession();
       this.context = new AudioContext();
       await this.context.resume();
     }

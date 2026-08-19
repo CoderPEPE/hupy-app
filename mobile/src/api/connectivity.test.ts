@@ -1,5 +1,6 @@
 import { API_BASE_URL } from '../config';
 import {
+  FAILURES_BEFORE_OFFLINE,
   HEALTH_TIMEOUT_MS,
   OFFLINE_POLL_MS,
   ONLINE_POLL_MS,
@@ -53,11 +54,38 @@ describe('createConnectivityMonitor — initial check & status transitions', () 
     expect(monitor.getStatus()).toBe('online');
   });
 
-  it('flips to offline when the ping fails', async () => {
+  it('holds its status through a single failed ping', async () => {
+    // One miss is not an outage — a cellular handoff or a cold container
+    // routinely blows the 6s probe timeout, and flipping offline on the
+    // first one tore down the navigator mid-lesson.
     const { monitor, seen } = setup([false]);
     monitor.start();
     await flush();
-    expect(seen).toEqual(['offline']);
+    expect(seen).toEqual(['checking']);
+    expect(monitor.getStatus()).toBe('checking');
+  });
+
+  it('flips to offline once the failures reach the threshold', async () => {
+    const { monitor, seen } = setup(Array(FAILURES_BEFORE_OFFLINE).fill(false));
+    monitor.start();
+    await flush();
+    for (let i = 1; i < FAILURES_BEFORE_OFFLINE; i++) {
+      await jest.advanceTimersByTimeAsync(OFFLINE_POLL_MS);
+      await flush();
+    }
+    expect(monitor.getStatus()).toBe('offline');
+    expect(seen[seen.length - 1]).toBe('offline');
+  });
+
+  it('a success resets the streak, so alternating failures never go offline', async () => {
+    const { monitor, seen } = setup([false, true, false, true, false, true]);
+    monitor.start();
+    await flush();
+    for (let i = 0; i < 5; i++) {
+      await jest.advanceTimersByTimeAsync(OFFLINE_POLL_MS + ONLINE_POLL_MS);
+      await flush();
+    }
+    expect(seen).not.toContain('offline');
   });
 
   it('reports the last result to every listener once', async () => {
@@ -118,14 +146,16 @@ describe('createConnectivityMonitor — polling', () => {
   });
 
   it('recovers to online after an offline streak when the server returns', async () => {
-    const { monitor, seen } = setup([false, true]);
+    const { monitor, seen } = setup([false, false, true]);
     monitor.start();
     await flush();
-    expect(seen).toEqual(['offline']);
+    await jest.advanceTimersByTimeAsync(OFFLINE_POLL_MS);
+    await flush();
+    expect(monitor.getStatus()).toBe('offline');
 
     await jest.advanceTimersByTimeAsync(OFFLINE_POLL_MS);
     await flush();
-    expect(seen).toEqual(['offline', 'online']);
+    expect(seen[seen.length - 1]).toBe('online');
     expect(monitor.getStatus()).toBe('online');
   });
 });
@@ -143,9 +173,10 @@ describe('createConnectivityMonitor — retry', () => {
     expect(monitor.getStatus()).toBe('checking');
     expect(seen).toEqual(['online', 'checking']);
 
+    // Retry resets the failure streak, so one failed probe leaves the
+    // monitor still 'checking' rather than declaring an outage.
     await flush();
-    expect(seen).toEqual(['online', 'checking', 'offline']);
-    expect(monitor.getStatus()).toBe('offline');
+    expect(monitor.getStatus()).toBe('checking');
   });
 
   it('supersedes a scheduled poll instead of stacking a second timer', async () => {
@@ -178,14 +209,16 @@ describe('createConnectivityMonitor — foreground recovery', () => {
   });
 
   it('recovers from offline when the app is foregrounded', async () => {
-    const { monitor, seen } = setup([false, true]);
+    const { monitor, seen } = setup([false, false, true]);
     monitor.start();
     await flush();
-    expect(seen).toEqual(['offline']);
+    await jest.advanceTimersByTimeAsync(OFFLINE_POLL_MS);
+    await flush();
+    expect(monitor.getStatus()).toBe('offline');
 
     monitor.onAppStateChange('active');
     await flush();
-    expect(seen).toEqual(['offline', 'online']);
+    expect(seen[seen.length - 1]).toBe('online');
   });
 
   it('ignores non-active app states', async () => {

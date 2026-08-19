@@ -19,6 +19,10 @@ jest.mock('../api/auth', () => ({
   setLanguage: jest.fn(),
   setVoice: jest.fn(),
   setName: jest.fn(),
+  appleLogin: jest.fn(),
+  // persistSession reports the device's UTC offset so streaks are counted on
+  // the learner's calendar; it is fire-and-forget, hence the resolved stub.
+  setTimezone: jest.fn().mockResolvedValue(undefined),
 }));
 
 // The Google client IDs come from EXPO_PUBLIC_* env vars that only exist in
@@ -27,6 +31,8 @@ jest.mock('../config', () => ({
   API_BASE_URL: 'http://localhost:3000',
   GOOGLE_WEB_CLIENT_ID: 'web-client-id',
   GOOGLE_IOS_CLIENT_ID: 'ios-client-id',
+  PRIVACY_URL: 'https://example.test/privacy',
+  TERMS_URL: 'https://example.test/terms',
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -50,6 +56,7 @@ const user = (overrides: Partial<User> = {}): User => ({
   base_language: 'pt',
   language: 'en',
   voice: '',
+  utc_offset_minutes: 0,
   ...overrides,
 });
 

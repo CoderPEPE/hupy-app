@@ -20,8 +20,8 @@ export const en = {
   'language.ptBR': 'Português (Brasil)',
 
   // Networking (api/client.ts)
-  'api.networkUnreachable': 'Could not reach the server. Is the backend running?',
-  'api.requestFailed': 'Request failed with status {{status}}',
+  'api.networkUnreachable': 'We could not reach Hupy. Check your connection and try again.',
+  'api.requestFailed': 'Something went wrong. Please try again.',
 
   // Full-screen offline state (components/OfflineScreen.tsx) — shown while
   // the backend is unreachable. The app clears it automatically on recovery.
@@ -39,6 +39,8 @@ export const en = {
   'auth.namePlaceholder': 'What should we call you?',
   'auth.nameRequired': 'Enter your name',
   'auth.emailInvalid': 'Enter a valid email address',
+  'auth.invalidCredentials': 'That email and password do not match. Please try again.',
+  'auth.emailTaken': 'An account with this email already exists.',
   'auth.passwordRequired': 'Enter your password',
 
   // Auth — login
@@ -49,7 +51,6 @@ export const en = {
   'auth.login.or': 'or',
   'auth.login.continueWithProvider': 'Continue with {{provider}}',
   'auth.login.createAccount': 'Create my account',
-  'auth.forgotPassword': 'I forgot my password',
   'auth.termsPrefix': 'By continuing, you agree to our ',
   'auth.terms': 'Terms of Use',
   'auth.and': ' and ',
@@ -127,7 +128,9 @@ export const en = {
   'home.live': 'LIVE',
   'home.livePitch': 'Practice conversation with AI.',
   'home.practiceNow': 'Practice now',
-  'home.streakEncourage': 'Keep it up! You are doing great.',
+  'home.streakCurrent': 'Current streak',
+  'home.streakKeepGoing': 'Keep it up!',
+  'home.streakDoingWell': 'You are doing great.',
   'home.dayOne': '{{count}} day',
   'home.dayOther': '{{count}} days',
   'home.profile': 'Profile',
@@ -499,7 +502,6 @@ export const en = {
   'permissionModal.title': 'Your turn to speak!',
   'permissionModal.body': 'Turn on the Microphone and Speech Recognition so hupy can correct your pronunciation.',
   'permissionModal.unlockMic': 'Enable microphone',
-  'permissionModal.unlockSpeech': 'Enable speech recognition',
 
   // Voice (useVoiceConversation.ts)
   'voice.micPermissionTitle': 'Microphone access',

@@ -5,6 +5,7 @@
 //! concerns and Diesel. Services orchestrate the repositories; nothing in
 //! this layer knows about `axum` or JSON.
 
+pub mod apple;
 pub mod curriculum;
 pub mod flashcards;
 pub mod gamification;

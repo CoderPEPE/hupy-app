@@ -11,6 +11,9 @@ export type User = {
   language: string;
   /** Chosen tutor voice (OpenAI voice id); empty = the course default. */
   voice: string;
+  /** Minutes east of UTC, as this device last reported. The daily streak is
+   * counted on this calendar rather than UTC's. */
+  utc_offset_minutes: number;
 };
 
 // ---------------------------------------------------------------------------

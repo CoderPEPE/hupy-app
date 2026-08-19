@@ -9,6 +9,7 @@ const user = (overrides: Partial<User> = {}): User => ({
   base_language: 'pt',
   language: 'en',
   voice: '',
+  utc_offset_minutes: 0,
   ...overrides,
 });
 

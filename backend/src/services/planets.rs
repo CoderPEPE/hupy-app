@@ -110,11 +110,7 @@ pub fn planet_finished(completed_modules: i64) -> bool {
 /// Progression is module-driven: a planet opens once the previous one's ten
 /// modules are done, and the unlock ratio counts modules, so "locked" can tell
 /// the learner exactly how far off they are.
-pub fn state_for(
-    p: &PlanetProgress,
-    completed_modules: i64,
-    prev: Option<i64>,
-) -> (String, f64) {
+pub fn state_for(p: &PlanetProgress, completed_modules: i64, prev: Option<i64>) -> (String, f64) {
     // Locked wins over everything: a planet you cannot reach has no progress
     // worth describing, and the ratio tells the learner how close they are.
     if let Some(prev_done) = prev {
@@ -147,7 +143,6 @@ pub fn is_finished_state(state: &str) -> bool {
     state == "conquered" || state == "mastered"
 }
 
-
 /// The ten block kinds, in path order: (kind, mastery threshold that marks it
 /// complete, the progress metric the block trains). The single source of
 /// truth for "how many blocks does a planet have" (the spec's standard
@@ -178,11 +173,9 @@ pub fn block_skill(kind: &str) -> &'static str {
         .unwrap_or("")
 }
 
-
 /// Total blocks per planet — exposed to the API so the app can say
 /// "4 of 10 blocks completed" without hardcoding the number.
 pub const TOTAL_BLOCKS: i64 = BLOCK_KINDS.len() as i64;
-
 
 /// The "sentences" progress metric: mastered/total, 0 when the planet has no
 /// sentences.
@@ -317,7 +310,14 @@ mod tests {
     /// so it lands on `level` too.
     fn even(level: f64) -> PlanetProgress {
         let mut p = PlanetProgress::empty(Uuid::nil());
-        for m in ["sentences", "pronunciation", "conversation", "listening", "flashcards", "review"] {
+        for m in [
+            "sentences",
+            "pronunciation",
+            "conversation",
+            "listening",
+            "flashcards",
+            "review",
+        ] {
             p = with_metric(p, m, level);
         }
         p
@@ -416,5 +416,4 @@ mod tests {
         assert_eq!(state, "locked");
         assert!((unlock - 0.5).abs() < 1e-9);
     }
-
 }

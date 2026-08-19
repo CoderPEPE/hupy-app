@@ -4,7 +4,7 @@
 use crate::db::{run_db, DbPool};
 use crate::errors::Result;
 use crate::models::PlanetStorySeed;
-use crate::schema::planet_story_seeds;
+use crate::schema::{planet_story_seeds, planets};
 use chrono::Utc;
 use diesel::prelude::*;
 use serde_json::{json, Value};
@@ -71,12 +71,47 @@ pub async fn find(pool: &DbPool, planet_id: Uuid) -> Result<Option<PlanetStorySe
     .await
 }
 
-/// Every seed, for the list endpoint — one query instead of one per planet.
-pub async fn all(pool: &DbPool) -> Result<Vec<PlanetStorySeed>> {
-    run_db(pool, |conn| {
+/// What the list endpoint needs about a seed: enough to render a library
+/// row, and deliberately *not* the transcript.
+#[derive(Debug, Clone, diesel::Queryable)]
+pub struct StorySeedSummary {
+    pub planet_id: Uuid,
+    pub id: Uuid,
+    pub title: String,
+    pub duration_secs: i32,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Seed summaries for one course — the library list.
+///
+/// Scoped to the learner's course and stripped of the `sentences` /
+/// `translation` JSONB on purpose: the table holds a seed per planet across
+/// every course, each one a full narration plus its translation, so loading
+/// all columns for all courses moved tens of megabytes per request and threw
+/// away everything but one course's worth. Transcripts are served by
+/// `find` (the single-story endpoint) when a learner actually opens a story.
+pub async fn summaries_for_course(
+    pool: &DbPool,
+    base_language: &str,
+    language: &str,
+) -> Result<Vec<StorySeedSummary>> {
+    let base = base_language.to_string();
+    let lang = language.to_string();
+    run_db(pool, move |conn| {
         Ok(planet_story_seeds::table
-            .select(planet_story_seeds::all_columns)
-            .load::<PlanetStorySeed>(conn)?)
+            .inner_join(planets::table.on(planets::id.eq(planet_story_seeds::planet_id)))
+            .filter(planets::base_language.eq(base))
+            .filter(planets::language.eq(lang))
+            .select((
+                planet_story_seeds::planet_id,
+                planet_story_seeds::id,
+                planet_story_seeds::title,
+                planet_story_seeds::duration_secs,
+                planet_story_seeds::created_at,
+                planet_story_seeds::updated_at,
+            ))
+            .load::<StorySeedSummary>(conn)?)
     })
     .await
 }

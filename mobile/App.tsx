@@ -1,11 +1,11 @@
-import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import React, { Component, useEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { ApiError } from './src/api/client';
 import { useConnectivity } from './src/api/connectivity';
+import { queryClient } from './src/api/queryClient';
 import { GamificationCelebration } from './src/components/GamificationCelebration';
 import { OfflineScreen } from './src/components/OfflineScreen';
 import { translate, useI18nStore } from './src/i18n';
@@ -13,21 +13,6 @@ import { RootNavigator } from './src/navigation/RootNavigator';
 import { initSecureStorage } from './src/storage';
 import { useAuthStore } from './src/store/auth';
 import { colors, radius, spacing } from './src/theme';
-
-const queryClient = new QueryClient({
-  queryCache: new QueryCache({
-    onError: (error) => {
-      // A 401 mid-session means the JWT expired or was revoked — end the
-      // session so the app returns to the login screen instead of erroring.
-      if (error instanceof ApiError && error.status === 401) {
-        useAuthStore.getState().signOut();
-      }
-    },
-  }),
-  defaultOptions: {
-    queries: { retry: 1, staleTime: 60_000 },
-  },
-});
 
 type BoundaryProps = { children: ReactNode };
 type BoundaryState = { error: Error | null };

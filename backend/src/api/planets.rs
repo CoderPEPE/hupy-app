@@ -456,19 +456,19 @@ async fn planet_detail(
     // The per-structure drill checkpoints for every module at once (one
     // query, no N+1) — what the chat's progress bar is drawn from.
     let structure_progress =
-        repositories::modules::structure_progress_for_planet(&state.pool, user_id, planet_id).await?;
+        repositories::modules::structure_progress_for_planet(&state.pool, user_id, planet_id)
+            .await?;
     let mut lessons = Vec::with_capacity(modules.len());
     for (module, module_state) in modules.iter().zip(&states) {
         // Only the reachable modules need their card counts: a locked module
         // has no cards yet, and querying all ten would be ten round trips for
         // numbers nobody reads.
-        let (flashcards_total, flashcards_reviewed) = if *module_state
-            == services::curriculum::ModuleState::Locked
-        {
-            (0, 0)
-        } else {
-            repositories::modules::flashcard_counts(&state.pool, user_id, module.id).await?
-        };
+        let (flashcards_total, flashcards_reviewed) =
+            if *module_state == services::curriculum::ModuleState::Locked {
+                (0, 0)
+            } else {
+                repositories::modules::flashcard_counts(&state.pool, user_id, module.id).await?
+            };
         lessons.push(PlanetLessonJson {
             id: module.id,
             position: module.position,
@@ -677,8 +677,7 @@ async fn master_sentence(
         let module_progress =
             repositories::modules::progress_for_planet(&state.pool, user_id, planet_id).await?;
         if let Some(current) = services::curriculum::current_module(&modules, &module_progress) {
-            if services::curriculum::structures(&current.structures).is_empty()
-                && mastered >= total
+            if services::curriculum::structures(&current.structures).is_empty() && mastered >= total
             {
                 repositories::modules::complete_conversation(
                     &state.pool,
@@ -687,6 +686,22 @@ async fn master_sentence(
                     serde_json::json!([]),
                 )
                 .await?;
+                // Closing only the conversation half strands the module: a
+                // sentence-taught module mints no corrections, so its deck is
+                // empty and the flashcard half can never close on its own.
+                // Mirror the authored path in api/modules.rs.
+                let (total_cards, reviewed_cards) =
+                    repositories::modules::flashcard_counts(&state.pool, user_id, current.id)
+                        .await?;
+                if total_cards == 0 || reviewed_cards >= total_cards {
+                    repositories::modules::set_flashcards_done(
+                        &state.pool,
+                        user_id,
+                        current.id,
+                        true,
+                    )
+                    .await?;
+                }
             }
         }
     }

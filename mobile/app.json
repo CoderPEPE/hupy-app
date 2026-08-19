@@ -8,7 +8,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "entitlements": {
         "keychain-access-groups": [
           "$(AppIdentifierPrefix)com.hupy.hupy"
@@ -17,9 +17,6 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSMicrophoneUsageDescription": "Hupy uses the microphone so you can practice speaking English with your AI tutor.",
-        "UIBackgroundModes": [
-          "audio"
-        ],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
@@ -50,6 +47,7 @@
           }
         }
       ],
+      "expo-apple-authentication",
       "expo-secure-store",
       "expo-dev-client",
       [
@@ -70,6 +68,11 @@
     },
     "updates": {
       "url": "https://u.expo.dev/bddea073-ba95-4095-96c8-4d08f362f20b"
+    },
+    "locales": {
+      "en": "./locales/en.json",
+      "es": "./locales/es.json",
+      "pt-BR": "./locales/pt-BR.json"
     }
   }
 }

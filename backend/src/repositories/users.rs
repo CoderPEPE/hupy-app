@@ -126,6 +126,24 @@ pub async fn delete_by_id(pool: &DbPool, user_id: Uuid) -> Result<bool> {
     .await
 }
 
+/// Records the learner's current UTC offset (minutes east of UTC), so the
+/// streak is counted on their calendar rather than UTC's.
+pub async fn update_utc_offset(
+    pool: &DbPool,
+    user_id: Uuid,
+    offset_minutes: i32,
+) -> Result<Option<User>> {
+    run_db(pool, move |conn| {
+        let updated = diesel::update(users::table.find(user_id))
+            .set(users::utc_offset_minutes.eq(offset_minutes))
+            .returning(User::as_returning())
+            .get_result(conn)
+            .optional()?;
+        Ok(updated)
+    })
+    .await
+}
+
 /// Changes the learner's display name.
 pub async fn update_name(pool: &DbPool, user_id: Uuid, name: &str) -> Result<Option<User>> {
     let name = name.to_string();

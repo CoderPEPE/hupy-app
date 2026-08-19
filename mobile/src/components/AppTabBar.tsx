@@ -1,8 +1,7 @@
-import { AudioLines, Copy, Headphones, Home, User } from 'lucide-react-native';
+import { AudioLines, Copy, Headphones, Home, Orbit, User } from 'lucide-react-native';
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { RingedPlanetIcon } from './icons/RingedPlanetIcon';
 import { useT } from '../i18n';
 import { useUiStore, type TabKey } from '../store/ui';
 import { colors, radius } from '../theme';
@@ -13,7 +12,7 @@ type TabIcon = React.ComponentType<{ size?: number; color?: string; strokeWidth?
 // floating in the centre.
 const SIDE_TABS: { key: TabKey; icon: TabIcon; labelKey: 'tabBar.home' | 'tabBar.planets' }[] = [
   { key: 'home', icon: Home, labelKey: 'tabBar.home' },
-  { key: 'planets', icon: RingedPlanetIcon, labelKey: 'tabBar.planets' },
+  { key: 'planets', icon: Orbit, labelKey: 'tabBar.planets' },
 ];
 const RIGHT_TABS: {
   key: TabKey;

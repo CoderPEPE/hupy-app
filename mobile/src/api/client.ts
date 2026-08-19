@@ -110,7 +110,15 @@ async function refreshAccessToken(): Promise<RefreshOutcome> {
       // Network blip — the token wasn't rotated, the session is still alive.
       return 'unreachable';
     }
-    if (!res.ok) return 'dead';
+    // Only the server rejecting the credential itself means the session is
+    // dead: 401 (token rejected, or its family revoked) and 400 (the stored
+    // token is malformed). Everything else — 429 from the rate limiter, 5xx
+    // from a database blip, the gateway's timeout — left the token
+    // un-rotated server-side, so the session is still perfectly good and
+    // treating it as dead would sign out a valid 30-day login on a bad
+    // minute.
+    if (res.status === 401 || res.status === 400) return 'dead';
+    if (!res.ok) return 'unreachable';
     const data = await res.json().catch(() => null);
     if (
       !data ||

@@ -25,7 +25,7 @@ import {
 } from './conversations';
 import { getGamificationStats } from './gamification';
 import { completeModuleConversation, recordProduction } from './modules';
-import { getStories, saveStoryProgress } from './stories';
+import { getStories, getStory, saveStoryProgress } from './stories';
 import { getVoices } from './voices';
 import { storage, StorageKeys } from '../storage';
 import type { CardRating } from '../types';
@@ -101,6 +101,16 @@ export function useConversations() {
 /** The story library. A story the AI is still writing arrives as
  * `status: 'generating'`, so the list polls until every story is ready
  * rather than leaving the learner staring at a spinner that never resolves. */
+/** One planet's story *with its transcript*. The library list deliberately
+ * omits transcripts, so the player fetches the story it is about to play. */
+export function useStory(planetId: string | undefined) {
+  return useQuery({
+    queryKey: [...queryKeys.stories, planetId],
+    queryFn: () => getStory(planetId as string),
+    enabled: Boolean(planetId),
+  });
+}
+
 export function useStories() {
   return useQuery({
     queryKey: queryKeys.stories,
@@ -185,14 +195,21 @@ export function useRecordProduction() {
   });
 }
 
-/** Persists playback position; the returned story is merged into the cache. */
+/** Persists playback position.
+ *
+ * The library list is only invalidated when a story *finishes*, because that
+ * is the one thing on it that changes. Invalidating on every save refetched
+ * the whole library once per sentence — roughly 245 round trips per
+ * playthrough — while the position it was fetching is already local state. */
 export function useSaveStoryProgress() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ planetId, positionSecs, completed }: { planetId: string; positionSecs: number; completed?: boolean }) =>
       saveStoryProgress(planetId, positionSecs, completed),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.stories });
+    onSuccess: (_data, variables) => {
+      if (variables.completed) {
+        qc.invalidateQueries({ queryKey: queryKeys.stories });
+      }
     },
   });
 }

@@ -21,8 +21,8 @@ export const ptBR: Translations = {
   'language.ptBR': 'Português (Brasil)',
 
   // Networking (api/client.ts)
-  'api.networkUnreachable': 'Não foi possível conectar ao servidor. O backend está rodando?',
-  'api.requestFailed': 'Falha na requisição (status {{status}})',
+  'api.networkUnreachable': 'Não conseguimos falar com o Hupy. Verifique sua conexão e tente de novo.',
+  'api.requestFailed': 'Algo deu errado. Tente novamente.',
 
   // Full-screen offline state (components/OfflineScreen.tsx)
   'offline.title': 'Sem conexão',
@@ -39,6 +39,8 @@ export const ptBR: Translations = {
   'auth.namePlaceholder': 'Como devemos te chamar?',
   'auth.nameRequired': 'Digite seu nome',
   'auth.emailInvalid': 'Digite um e-mail válido',
+  'auth.invalidCredentials': 'Esse e-mail e senha não conferem. Tente novamente.',
+  'auth.emailTaken': 'Já existe uma conta com este e-mail.',
   'auth.passwordRequired': 'Digite sua senha',
 
   // Auth — login
@@ -49,7 +51,6 @@ export const ptBR: Translations = {
   'auth.login.or': 'ou',
   'auth.login.continueWithProvider': 'Continuar com o {{provider}}',
   'auth.login.createAccount': 'Criar minha conta',
-  'auth.forgotPassword': 'Esqueci minha senha',
   'auth.termsPrefix': 'Ao continuar, você concorda com nossos ',
   'auth.terms': 'Termos de Uso',
   'auth.and': ' e ',
@@ -127,7 +128,9 @@ export const ptBR: Translations = {
   'home.live': 'AO VIVO',
   'home.livePitch': 'Pratique conversação com a IA.',
   'home.practiceNow': 'Praticar agora',
-  'home.streakEncourage': 'Continue assim! Você está indo muito bem.',
+  'home.streakCurrent': 'Sequência atual',
+  'home.streakKeepGoing': 'Continue assim!',
+  'home.streakDoingWell': 'Você está indo muito bem.',
   'home.dayOne': '{{count}} dia',
   'home.dayOther': '{{count}} dias',
   'home.profile': 'Perfil',
@@ -495,7 +498,6 @@ export const ptBR: Translations = {
   'permissionModal.title': 'Sua vez de falar!',
   'permissionModal.body': 'Ative o Microfone e o Reconhecimento de Voz para o hupy corrigir a sua pronúncia.',
   'permissionModal.unlockMic': 'Ativar microfone',
-  'permissionModal.unlockSpeech': 'Ativar reconhecimento de voz',
 
   // Voice (useVoiceConversation.ts)
   'voice.micPermissionTitle': 'Acesso ao microfone',

@@ -44,8 +44,7 @@ pub async fn progress_for_planet(
     run_db(pool, move |conn| {
         let rows: Vec<ModuleProgress> = user_module_progress::table
             .inner_join(
-                planet_lessons::table
-                    .on(planet_lessons::id.eq(user_module_progress::lesson_id)),
+                planet_lessons::table.on(planet_lessons::id.eq(user_module_progress::lesson_id)),
             )
             .filter(user_module_progress::user_id.eq(user_id))
             .filter(planet_lessons::planet_id.eq(planet_id))
@@ -125,11 +124,7 @@ pub async fn set_flashcards_done(
 /// (cards in this module, of those how many have been reviewed at least once)
 /// — the numbers the flashcard gate is decided from, and what the app shows
 /// as "3 of 6 cards".
-pub async fn flashcard_counts(
-    pool: &DbPool,
-    user_id: Uuid,
-    lesson_id: Uuid,
-) -> Result<(i64, i64)> {
+pub async fn flashcard_counts(pool: &DbPool, user_id: Uuid, lesson_id: Uuid) -> Result<(i64, i64)> {
     run_db(pool, move |conn| {
         let total: i64 = flashcards::table
             .filter(flashcards::user_id.eq(user_id))
@@ -370,8 +365,7 @@ pub async fn completed_counts_by_planet(
     run_db(pool, move |conn| {
         let rows: Vec<(Uuid, i64)> = user_module_progress::table
             .inner_join(
-                planet_lessons::table
-                    .on(planet_lessons::id.eq(user_module_progress::lesson_id)),
+                planet_lessons::table.on(planet_lessons::id.eq(user_module_progress::lesson_id)),
             )
             .filter(user_module_progress::user_id.eq(user_id))
             .filter(user_module_progress::conversation_done.eq(true))

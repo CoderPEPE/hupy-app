@@ -21,6 +21,28 @@ export function configureIosSession(): void {
   });
 }
 
+/**
+ * Session options for playback that has no microphone alongside it: the audio
+ * stories, flashcard TTS and the XP chime.
+ *
+ * PlayAndRecord + VoiceChat exists to keep hardware echo cancellation running
+ * while the mic is live, and it costs real fidelity — iOS drops the route to
+ * telephony quality and a paired Bluetooth device to the HFP profile, which
+ * is why stories sounded like a phone call. Nothing here records, so it uses
+ * plain playback.
+ *
+ * Only safe while no conversation is open; callers must check
+ * `realtimeAudioPlayer.isSessionActive` first, because switching category
+ * mid-conversation would drop the microphone.
+ */
+export function configurePlaybackSession(): void {
+  AudioManager.setAudioSessionOptions({
+    iosCategory: 'playback',
+    iosMode: 'default',
+    iosOptions: [],
+  });
+}
+
 /** OpenAI Realtime audio output format: 24 kHz mono PCM16. */
 const OUTPUT_SAMPLE_RATE = 24000;
 
@@ -31,9 +53,12 @@ class RealtimeAudioPlayer {
    * grinding the runtime) — the tutor's audio hiccups instead of the queue
    * (and the app's memory) growing for the whole session. */
   private static QUEUE_LIMIT_MS = 20_000;
-  /** Upper bound on simultaneously alive buffer sources — a second, cheaper
-   * guard on top of the time-based cap above. */
-  private static MAX_SOURCES = 64;
+  /** Hard ceiling on simultaneously alive buffer sources. This is a runaway
+   * guard only — `QUEUE_LIMIT_MS` above is the real budget. It used to be 64,
+   * which the Realtime API's ~100 ms deltas hit after ~6 s of audio, so the
+   * middle of a long sentence was silently dropped while the intended 20 s
+   * budget still had room. */
+  private static MAX_SOURCES = 512;
 
   private context: AudioContext | null = null;
   /** True while a live voice conversation is open — the XP chime player uses
@@ -142,6 +167,13 @@ class RealtimeAudioPlayer {
       this.sources.add(source);
       source.onEnded = () => {
         this.sources.delete(source);
+        // Nulling the handler is what actually unregisters it: the library's
+        // setter adds an event listener and throws the subscription away, so
+        // the only path that ever calls `unregisterCallback` is its falsy
+        // branch. Without this every chunk's source node and its decoded PCM
+        // stay alive in the native registry, and memory climbs for the whole
+        // conversation.
+        source.onEnded = null;
         // When the last buffer finishes, playback is truly done.
         if (this.sources.size === 0 && this.playbackEndAt > 0) {
           this.playbackEndAt = 0;
@@ -184,6 +216,10 @@ class RealtimeAudioPlayer {
   async clear(): Promise<void> {
     this.sources.forEach((source) => {
       try {
+        // Unregister before stopping: `stop()` normally fires `ended`, whose
+        // handler releases the listener, but a source that is already stopped
+        // throws and would never fire it — leaking the native callback.
+        source.onEnded = null;
         source.stop();
       } catch {
         // already stopped

@@ -21,9 +21,9 @@ import { colors, radius, shadows, spacing } from '../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-/** Astronaut mascot PNG's own aspect ratio (853x1280) — used to size it
+/** Astronaut mascot PNG's own aspect ratio (1024x1536) — used to size it
  * without letterboxing or cropping at any hero height. */
-const MASCOT_ASPECT = 853 / 1280;
+const MASCOT_ASPECT = 1024 / 1536;
 
 function StarSpark({ size = 14, color = colors.gold }: { size?: number; color?: string }) {
   return (

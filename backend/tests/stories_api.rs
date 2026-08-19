@@ -172,6 +172,11 @@ async fn a_conquered_planet_plays_its_seeded_story() {
     )
     .await;
     for module in detail["lessons"].as_array().unwrap() {
+        // Sentence mastery above already closed the first module outright
+        // (both halves — see planets_api), so it is no longer current.
+        if module["state"] == "completed" {
+            continue;
+        }
         let id = module["id"].as_str().unwrap();
         let (status, body) = request(
             &app,
@@ -198,14 +203,35 @@ async fn a_conquered_planet_plays_its_seeded_story() {
     let story = &entry["story"];
     assert_eq!(story["title"], "A Day on Mercury", "{entry}");
     assert_eq!(story["status"], "ready");
-    assert_eq!(story["sentences"].as_array().unwrap().len(), 3);
-    assert_eq!(
-        story["sentences"].as_array().unwrap().len(),
-        story["translation"].as_array().unwrap().len(),
-        "translation must align 1:1 with the transcript"
-    );
     assert_eq!(story["duration_secs"], 42);
     assert_eq!(story["position_secs"], 0, "nothing listened to yet");
+    // The library list carries no transcript on purpose: the table holds a
+    // full narration per planet across every course, so shipping them all on
+    // a list request moved megabytes per screen load.
+    assert!(
+        story["sentences"].as_array().unwrap().is_empty(),
+        "the list must not carry transcripts: {entry}"
+    );
+
+    // …the transcript comes from the single-story endpoint, when the learner
+    // actually opens it.
+    let (status, full) = request(
+        &app,
+        "GET",
+        &format!("/api/stories/{p1}"),
+        Some(&token),
+        None,
+        "10.0.43.15",
+    )
+    .await;
+    assert_eq!(status.as_u16(), 200, "{full}");
+    assert_eq!(full["title"], "A Day on Mercury", "{full}");
+    assert_eq!(full["sentences"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        full["sentences"].as_array().unwrap().len(),
+        full["translation"].as_array().unwrap().len(),
+        "translation must align 1:1 with the transcript"
+    );
 
     // Playback progress is persisted against the seed…
     let (status, saved) = request(
@@ -250,5 +276,55 @@ async fn a_conquered_planet_plays_its_seeded_story() {
     .await;
     assert_eq!(finished["position_secs"], 42);
     assert_eq!(finished["completed"], true);
-    assert_eq!(finished["id"], story["id"], "the story identity is the seed");
+    assert_eq!(
+        finished["id"], story["id"],
+        "the story identity is the seed"
+    );
+}
+
+/// A planet whose modules are unfinished must not hand over its story.
+///
+/// Regression: the list endpoint withheld locked transcripts, but
+/// `GET /api/stories/{planet_id}` served any planet's full narration to
+/// anyone who asked — the spoiler the gate exists to prevent.
+#[tokio::test]
+async fn a_locked_planet_will_not_serve_its_story() {
+    let app = app(30, 120);
+    let email = unique_email("locked-story");
+    let token = register(&app, &email).await;
+
+    let (_, planets) = request(&app, "GET", "/api/planets", Some(&token), None, "10.0.44.1").await;
+    // The last planet of the course: nothing has been completed on it.
+    let locked = planets.as_array().unwrap().last().unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, body) = request(
+        &app,
+        "GET",
+        &format!("/api/stories/{locked}"),
+        Some(&token),
+        None,
+        "10.0.44.2",
+    )
+    .await;
+    assert_eq!(
+        status.as_u16(),
+        404,
+        "a locked story must be indistinguishable from a missing one: {body}"
+    );
+
+    // Saving progress against it is refused for the same reason — otherwise
+    // creating a progress row would unlock the story as a side effect.
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/api/stories/{locked}/progress"),
+        Some(&token),
+        Some(json!({ "position_secs": 10 })),
+        "10.0.44.3",
+    )
+    .await;
+    assert_eq!(status.as_u16(), 404, "{body}");
 }

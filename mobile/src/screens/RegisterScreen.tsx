@@ -8,6 +8,9 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import type { AuthStackParamList } from '../navigation/RootNavigator';
 import { useT, type TranslationKey } from '../i18n';
 import { useAuthStore } from '../store/auth';
+import { PRIVACY_URL, TERMS_URL } from '../config';
+import { openUrl } from '../utils/openUrl';
+import { ApiError } from '../api/client';
 import { colors, spacing } from '../theme';
 import { isValidEmail, MIN_PASSWORD_LENGTH } from '../utils/validation';
 
@@ -76,7 +79,12 @@ export function RegisterScreen({ navigation }: Props) {
   const mutation = useMutation({
     mutationFn: () => signUp(email.trim(), password, name),
     onError: (err) => {
-      const message = err instanceof Error ? err.message : t('common.somethingWrong');
+      // Same reasoning as LoginScreen: 409 is unambiguous, everything else
+      // gets the generic line rather than an English server string.
+      const message =
+        err instanceof ApiError && err.status === 409
+          ? t('auth.emailTaken')
+          : t('common.somethingWrong');
       setFieldErrors((prev) => ({ ...prev, email: message }));
     },
   });
@@ -193,11 +201,19 @@ export function RegisterScreen({ navigation }: Props) {
         </Text>
       </Pressable>
 
+      {/* Real links, not underlined decoration: App Review taps these, and
+          an app with account creation that cannot show its privacy policy
+          from inside the binary is rejected (Guideline 5.1.1(i)). */}
       <Text style={styles.terms}>
         {t('auth.termsPrefix')}
-        <Text style={styles.termsLink}>{t('auth.terms')}</Text>
+        <Text style={styles.termsLink} onPress={() => void openUrl(TERMS_URL)} suppressHighlighting>
+          {t('auth.terms')}
+        </Text>
         {t('auth.and')}
-        <Text style={styles.termsLink}>{t('auth.privacy')}</Text>.
+        <Text style={styles.termsLink} onPress={() => void openUrl(PRIVACY_URL)} suppressHighlighting>
+          {t('auth.privacy')}
+        </Text>
+        .
       </Text>
     </AuthLayout>
   );

@@ -1,11 +1,13 @@
 import {
   Check,
   ChevronRight,
+  FileText,
   Flame,
   Globe,
   LogOut,
   Mic,
   Settings,
+  Shield,
   Star,
   Trash2,
   Trophy,
@@ -17,6 +19,8 @@ import { ActivityIndicator, Image, Modal, Pressable, ScrollView, StyleSheet, Tex
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useGamificationStats, queryKeys } from '../api/hooks';
 import type { Badge } from '../api/gamification';
+import { PRIVACY_URL, TERMS_URL } from '../config';
+import { openUrl } from '../utils/openUrl';
 import { AchievementsModal } from '../components/AchievementsModal';
 import { achievementIcon } from '../components/achievementIcons';
 import { AppTabBar } from '../components/AppTabBar';
@@ -120,6 +124,26 @@ function SettingsSheet({ visible, onClose, onSignOut }: { visible: boolean; onCl
           <Pressable style={styles.signOutBtn} onPress={onSignOut}>
             <LogOut size={16} color={colors.error} />
             <Text style={styles.signOutText}>{t('chat.logOut')}</Text>
+          </Pressable>
+
+          {/* The legal documents have to stay reachable after sign-up too:
+              anyone who joined with Google or Apple never saw the register
+              screen's links, and App Review looks for them in settings. */}
+          <Pressable
+            style={styles.legalRow}
+            onPress={() => void openUrl(PRIVACY_URL)}
+            accessibilityRole="link"
+          >
+            <Shield size={15} color={colors.textMuted} />
+            <Text style={styles.legalText}>{t('auth.privacy')}</Text>
+          </Pressable>
+          <Pressable
+            style={styles.legalRow}
+            onPress={() => void openUrl(TERMS_URL)}
+            accessibilityRole="link"
+          >
+            <FileText size={15} color={colors.textMuted} />
+            <Text style={styles.legalText}>{t('auth.terms')}</Text>
           </Pressable>
 
           {confirming ? (
@@ -658,6 +682,18 @@ const styles = StyleSheet.create({
   },
   // Delete account: understated until armed, so it never competes with
   // sign-out for a distracted tap.
+  legalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+  },
+  legalText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textMuted,
+  },
   deleteLink: {
     flexDirection: 'row',
     alignItems: 'center',
